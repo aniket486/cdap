@@ -42,9 +42,11 @@ public class ClusterOp {
   public enum Status {
     REQUESTING_CREATE,
     POLLING_CREATE,
+    INITIALIZING,
     CREATED,
     REQUESTING_DELETE,
     POLLING_DELETE,
+    DELETED,
     FAILED,
     ORPHANED
   }
