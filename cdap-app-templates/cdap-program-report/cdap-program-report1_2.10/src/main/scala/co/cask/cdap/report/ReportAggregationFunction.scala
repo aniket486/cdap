@@ -98,12 +98,8 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
   override def update(buffer: MutableAggregationBuffer, input: Row): Unit = {
     val bufferRow = new GenericRowWithSchema(buffer.toSeq.toArray, bufferSchema)
     val row = new GenericRowWithSchema(input.toSeq.toArray, inputSchema)
-    updateBufferWithRow(buffer, bufferRow, row, Constants.NAMESPACE)
-    updateBufferWithRow(buffer, bufferRow, row, Constants.APPLICATION_NAME)
-    updateBufferWithRow(buffer, bufferRow, row, Constants.APPLICATION_VERSION)
-    updateBufferWithRow(buffer, bufferRow, row, Constants.PROGRAM_TYPE)
-    updateBufferWithRow(buffer, bufferRow, row, Constants.PROGRAM)
-    updateBufferWithRow(buffer, bufferRow, row, Constants.RUN)
+    updateBufferWithRow(buffer, bufferRow, row, Constants.NAMESPACE, Constants.APPLICATION_NAME,
+      Constants.APPLICATION_VERSION, Constants.PROGRAM_TYPE, Constants.PROGRAM, Constants.RUN)
     // append status and time from the input row to statuses field in the buffer
     buffer.update(bufferRow.fieldIndex(STATUSES),
       bufferRow.getAs[Seq[Row]](STATUSES) :+ Row(row.getAs(Constants.STATUS),
@@ -115,27 +111,23 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
   }
 
   /**
-    * Updates a field in the buffer with the String value from the corresponding column in the given row.
+    * For each field in the given fields, updates each field in the buffer with the String value from the corresponding column in the given row.
     *
     * @param buffer the buffer to be updated
     * @param bufferRow a row constructed with schema from the buffer to be updated
     * @param row the row to get value from
-    * @param field the field name in the buffer as well as column name in the row
+    * @param fields the field names in the buffer as well as column name in the row
     */
   private def updateBufferWithRow(buffer: MutableAggregationBuffer, bufferRow: GenericRowWithSchema,
-                                  row: GenericRowWithSchema, field: String): Unit = {
-    buffer.update(bufferRow.fieldIndex(field), row.getAs[String](field))
+                                  row: GenericRowWithSchema, fields: String*): Unit = {
+    fields.foreach(field => buffer.update(bufferRow.fieldIndex(field), row.getAs[String](field)))
   }
 
   override def merge(buffer1: MutableAggregationBuffer, buffer2: Row): Unit = {
     val buffer1Row = new GenericRowWithSchema(buffer1.toSeq.toArray, bufferSchema)
     val buffer2Row = new GenericRowWithSchema(buffer2.toSeq.toArray, bufferSchema)
-    mergeBuffers(buffer1, buffer1Row, buffer2Row, Constants.NAMESPACE)
-    mergeBuffers(buffer1, buffer1Row, buffer2Row, Constants.APPLICATION_NAME)
-    mergeBuffers(buffer1, buffer1Row, buffer2Row, Constants.APPLICATION_VERSION)
-    mergeBuffers(buffer1, buffer1Row, buffer2Row, Constants.PROGRAM_TYPE)
-    mergeBuffers(buffer1, buffer1Row, buffer2Row, Constants.PROGRAM)
-    mergeBuffers(buffer1, buffer1Row, buffer2Row, Constants.RUN)
+    mergeBuffers(buffer1, buffer1Row, buffer2Row, Constants.NAMESPACE, Constants.APPLICATION_NAME,
+      Constants.APPLICATION_VERSION, Constants.PROGRAM_TYPE, Constants.PROGRAM, Constants.RUN)
     // update statuses in buffer1 by combining the statuses from both buffer1 and buffer2
     buffer1.update(buffer1Row.fieldIndex(STATUSES),
       buffer1Row.getAs[Seq[Row]](STATUSES) ++ buffer2Row.getAs[Seq[Row]](STATUSES))
@@ -147,19 +139,19 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
 
 
   /**
-    * Update the field in the first buffer with the String value from the corresponding field in the second
-    * buffer if the field in the first buffer is empty.
+    * For each field in the given fields, update each field in the first buffer with the String value from
+    * the corresponding fields in the second buffer if the field in the first buffer is empty.
     *
     * @param buffer1 the buffer to be updated
     * @param buffer1Row a row constructed with schema from the buffer to be updated
     * @param buffer2Row a row constructed with schema from the second buffer
-    * @param field the field name
+    * @param fields the field names
     */
   private def mergeBuffers(buffer1: MutableAggregationBuffer, buffer1Row: GenericRowWithSchema,
-                           buffer2Row: GenericRowWithSchema, field: String): Unit = {
-    if (buffer1Row.getAs[String](field).isEmpty) {
+                           buffer2Row: GenericRowWithSchema, fields: String*): Unit = {
+    fields.foreach(field => if (buffer1Row.getAs[String](field).isEmpty) {
       buffer1.update(buffer1Row.fieldIndex(field), buffer2Row.getAs[String](field))
-    }
+    })
   }
 
   override def evaluate(buffer: Row): Row = {
