@@ -16,29 +16,30 @@
 
 package co.cask.cdap.proto.metadata.lineage;
 
+import co.cask.cdap.api.annotation.Beta;
+import co.cask.cdap.proto.id.DatasetId;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * Class representing the individual record in the {@link FieldLineageSummary}.
+ * Represents a record in a {@link FieldLineageSummary}. Each record consists
+ * of dataset and subset of its fields. The combination of both dataset and field
+ * can represent either the origin or destination in the field lineage summary for a
+ * given field.
  */
-public class FieldLineageSummaryRecord {
-  private final String namespace;
-  private final String dataset;
+@Beta
+public class DatasetField {
+  private final DatasetId dataset;
   private final List<String> fields;
 
-  public FieldLineageSummaryRecord(String namespace, String dataset, List<String> fields) {
-    this.namespace = namespace;
+  public DatasetField(DatasetId dataset, List<String> fields) {
     this.dataset = dataset;
     this.fields = Collections.unmodifiableList(new ArrayList<>(fields));
   }
 
-  public String getNamespace() {
-    return namespace;
-  }
-
-  public String getDataset() {
+  public DatasetId getDataset() {
     return dataset;
   }
 

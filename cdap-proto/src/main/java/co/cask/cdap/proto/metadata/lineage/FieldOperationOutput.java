@@ -16,6 +16,7 @@
 
 package co.cask.cdap.proto.metadata.lineage;
 
+import co.cask.cdap.api.annotation.Beta;
 import co.cask.cdap.api.lineage.field.EndPoint;
 
 import java.util.ArrayList;
@@ -25,8 +26,11 @@ import java.util.List;
 import javax.annotation.Nullable;
 
 /**
- * Represents output of a field operation.
+ * Represents the output of the field operation. Output of the field operation
+ * can either be {@link List} of {@link EndPoint}s, in case of {@link co.cask.cdap.api.lineage.field.WriteOperation}
+ * or {@link List} of field names in case of {@link co.cask.cdap.api.lineage.field.TransformOperation}s.
  */
+@Beta
 public class FieldOperationOutput {
   private final List<EndPoint> endPoints;
   private final List<String> fields;

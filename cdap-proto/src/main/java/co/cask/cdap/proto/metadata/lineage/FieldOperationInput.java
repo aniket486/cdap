@@ -16,6 +16,7 @@
 
 package co.cask.cdap.proto.metadata.lineage;
 
+import co.cask.cdap.api.annotation.Beta;
 import co.cask.cdap.api.lineage.field.EndPoint;
 import co.cask.cdap.api.lineage.field.InputField;
 
@@ -24,9 +25,13 @@ import java.util.Collections;
 import java.util.List;
 
 import javax.annotation.Nullable;
+
 /**
- * Represents input to the field operation.
+ * Represents input to the field operation. Input to the field operation
+ * can either be {@link List} of {@link EndPoint}s, in case of {@link co.cask.cdap.api.lineage.field.ReadOperation},
+ * or {@link List} of {@link InputField}s in case of {@link co.cask.cdap.api.lineage.field.TransformOperation}s.
  */
+@Beta
 public class FieldOperationInput {
   private final List<EndPoint> endPoints;
   private final List<InputField> fields;

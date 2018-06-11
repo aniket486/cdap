@@ -16,14 +16,20 @@
 
 package co.cask.cdap.proto.metadata.lineage;
 
+import co.cask.cdap.api.annotation.Beta;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * Represents information about the field operations along with the programs who
- * performed them.
+ * In field lineage details, each incoming or outgoing record for a particular
+ * field of a dataset is represented by instance of ProgramFieldOperationInfo class.
+ * The instance represents {@link List} of programs each of which performed same {@link List}
+ * of field operations either to generate the field(in case of incoming record) or to generate
+ * different fields from a given field(in case of outgoing record).
  */
+@Beta
 public class ProgramFieldOperationInfo {
   private final List<ProgramInfo> programs;
   private final List<FieldOperationInfo> operations;
