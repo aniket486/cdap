@@ -87,6 +87,15 @@ case class RecordBuilder(namespace: String, applicationName: String, application
     r
   }
 
+  /**
+    * Returns how the program run was started
+    *
+    * @param runtimeArgs the runtime arguments of the program run
+    * @return one of the methods [[ProgramRunStartMethod.MANUAL]], [[ProgramRunStartMethod.SCHEDULED]]
+    *         and [[ProgramRunStartMethod.TRIGGERED]] each indicating that the program run
+    *         was started manually, scheduled by time, or triggered by certain condition such as new dataset partition
+    *         and program status.
+    */
   private def getStartMethod(runtimeArgs: Option[scala.collection.Map[String, String]]): ProgramRunStartMethod = {
     if (runtimeArgs.isEmpty) return ProgramRunStartMethod.MANUAL
     val scheduleInfoJson = runtimeArgs.get.get(Constants.Notification.SCHEDULE_INFO_KEY)

@@ -19,6 +19,7 @@ package co.cask.cdap.report
 import java.util.concurrent.TimeUnit
 
 import co.cask.cdap.api.schedule.{TriggerInfo, TriggeringScheduleInfo}
+import co.cask.cdap.report.proto.ProgramRunStartMethod
 import co.cask.cdap.report.util.{Constants, TriggeringScheduleInfoAdapter}
 import com.google.gson.GsonBuilder
 import org.apache.spark.sql.Row
@@ -44,14 +45,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     .add(Constants.STATUS, StringType, false)
     .add(Constants.TIME, LongType, false)
     .add(Constants.MESSAGE_ID, StringType, false)
-    .add(Constants.START_INFO, new StructType()
-      .add(Constants.USER, StringType, true)
-      .add(Constants.RUNTIME_ARGUMENTS, MapType(StringType, StringType), false)
-      .add(Constants.ARTIFACT_ID, new StructType()
-        .add(Constants.ARTIFACT_NAME, StringType, false)
-        .add(Constants.ARTIFACT_SCOPE, StringType, false)
-        .add(Constants.ARTIFACT_VERSION, StringType, false), false),
-      true)
+    .add(Constants.START_INFO, INPUT_START_INFO_SCHEMA, true)
 
   override def bufferSchema: StructType = new StructType()
     .add(Constants.NAMESPACE, StringType, false)
@@ -63,12 +57,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     .add(STATUSES, ArrayType(new StructType()
       .add(Constants.STATUS, StringType, false)
       .add(Constants.TIME, LongType)), false)
-    .add(Constants.START_INFO, new StructType()
-      .add(Constants.USER, StringType, true)
-      .add(Constants.RUNTIME_ARGUMENTS, MapType(StringType, StringType), false)
-      .add(Constants.ARTIFACT_NAME, StringType, false)
-      .add(Constants.ARTIFACT_SCOPE, StringType, false)
-      .add(Constants.ARTIFACT_VERSION, StringType, false),
+    .add(Constants.START_INFO, BUFFER_START_INFO_SCHEMA,
       true)
 
   override def dataType: DataType = new StructType()
@@ -121,7 +110,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
       TimeUnit.MILLISECONDS.toSeconds(row.getAs[Long](Constants.TIME))))
     // Get the StartInfo from the buffer if it exists or construct a new StartInfo from the input row
     val startInfo = Option(bufferRow.getAs[Row](Constants.START_INFO))
-      .orElse(Option(row.getAs[Row](Constants.START_INFO)).map(rowToStartInfo))
+      .orElse(Option(row.getAs[Row](Constants.START_INFO)).map(convertInputStartInfoRow))
     buffer.update(bufferRow.fieldIndex(Constants.START_INFO), startInfo)
   }
 
@@ -190,7 +179,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     val startInfo = Option(bufferRow.getAs[Row](Constants.START_INFO))
     val duration = end.flatMap(e => start.map(e - _))
     val runtimeArgs = startInfo.map(_.getAs[Map[String, String]](Constants.RUNTIME_ARGUMENTS))
-    val startMethod = getStartMethod(runtimeArgs)
+    val startMethod = getStartMethod(runtimeArgs).name()
     val r = Row(bufferRow.getAs[String](Constants.NAMESPACE),
       startInfo.map(_.getAs[String](Constants.ARTIFACT_NAME)).orNull,
       startInfo.map(_.getAs[String](Constants.ARTIFACT_VERSION)).orNull,
@@ -206,20 +195,36 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     r
   }
 
-  private def getStartMethod(runtimeArgs: Option[scala.collection.Map[String, String]]): String = {
-    if (runtimeArgs.isEmpty) return MANUAL
+  /**
+    * Returns how the program run was started
+    *
+    * @param runtimeArgs the runtime arguments of the program run
+    * @return one of the methods [[ProgramRunStartMethod.MANUAL]], [[ProgramRunStartMethod.SCHEDULED]]
+    *         and [[ProgramRunStartMethod.TRIGGERED]] each indicating that the program run
+    *         was started manually, scheduled by time, or triggered by certain condition such as new dataset partition
+    *         and program status.
+    */
+  private def getStartMethod(runtimeArgs: Option[scala.collection.Map[String, String]]): ProgramRunStartMethod = {
+    if (runtimeArgs.isEmpty) return ProgramRunStartMethod.MANUAL
     val scheduleInfoJson = runtimeArgs.get.get(SCHEDULE_INFO_KEY)
-    if (scheduleInfoJson.isEmpty) return MANUAL
+    if (scheduleInfoJson.isEmpty) return ProgramRunStartMethod.MANUAL
     val scheduleInfo: TriggeringScheduleInfo = GSON.fromJson(scheduleInfoJson.get, classOf[TriggeringScheduleInfo])
     val triggers = scheduleInfo.getTriggerInfos
-    if (Option(triggers).isEmpty || triggers.isEmpty) return MANUAL
+    if (Option(triggers).isEmpty || triggers.isEmpty) return ProgramRunStartMethod.MANUAL
     triggers.get(0).getType match {
-      case TriggerInfo.Type.TIME => SCHEDULED
-      case _ => TRIGGERED
+      case TriggerInfo.Type.TIME => ProgramRunStartMethod.SCHEDULED
+      case _ => ProgramRunStartMethod.TRIGGERED
     }
   }
 
-  private def rowToStartInfo(startInfoRow: Row): Row = {
+  /**
+    * Converts the row with schema [[INPUT_START_INFO_SCHEMA]] from an input row to a row
+    * with with schema [[BUFFER_START_INFO_SCHEMA]] in the buffer.
+    *
+    * @param startInfoRow the original row with schema [[INPUT_START_INFO_SCHEMA]]
+    * @return a row with schema [[BUFFER_START_INFO_SCHEMA]]
+    */
+  private def convertInputStartInfoRow(startInfoRow: Row): Row = {
     val artifact: Row = startInfoRow.getAs[Row](Constants.ARTIFACT_ID)
     Row(startInfoRow.getAs[String](Constants.USER),
       startInfoRow.getAs[scala.collection.Map[String, String]](Constants.RUNTIME_ARGUMENTS),
@@ -232,9 +237,20 @@ object ReportAggregationFunction {
   val LOG = LoggerFactory.getLogger(ReportAggregationFunction.getClass)
   val STATUSES = "statuses"
   val END_STATUSES = Set("COMPLETED", "KILLED", "FAILED")
-  val MANUAL = "MANUAL"
-  val SCHEDULED = "SCHEDULED"
-  val TRIGGERED = "TRIGGERED"
   val SCHEDULE_INFO_KEY = "triggeringScheduleInfo"
+  val ARTIFACT_SCHEMA = new StructType()
+    .add(Constants.ARTIFACT_NAME, StringType, false)
+    .add(Constants.ARTIFACT_SCOPE, StringType, false)
+    .add(Constants.ARTIFACT_VERSION, StringType, false)
+  val INPUT_START_INFO_SCHEMA = new StructType()
+    .add(Constants.USER, StringType, true)
+    .add(Constants.RUNTIME_ARGUMENTS, MapType(StringType, StringType), false)
+    .add(Constants.ARTIFACT_ID, ARTIFACT_SCHEMA, false)
+  val BUFFER_START_INFO_SCHEMA = new StructType()
+    .add(Constants.USER, StringType, true)
+    .add(Constants.RUNTIME_ARGUMENTS, MapType(StringType, StringType), false)
+    .add(Constants.ARTIFACT_NAME, StringType, false)
+    .add(Constants.ARTIFACT_SCOPE, StringType, false)
+    .add(Constants.ARTIFACT_VERSION, StringType, false)
   val GSON = TriggeringScheduleInfoAdapter.addTypeAdapters(new GsonBuilder).create()
 }
