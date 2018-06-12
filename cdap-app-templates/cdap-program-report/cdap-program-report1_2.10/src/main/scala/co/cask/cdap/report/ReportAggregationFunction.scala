@@ -69,7 +69,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
       .add(Constants.STATUS, StringType, false)
       .add(Constants.TIME, LongType)), false)
     // the START_INFO field is nullable
-    .add(Constants.START_INFO, BUFFER_START_INFO_SCHEMA, true)
+    .add(Constants.START_INFO, INPUT_START_INFO_SCHEMA, true)
 
   /**
     * The [[DataType]] of the returned value of this [[UserDefinedAggregateFunction]]. It contains all the possible
@@ -77,16 +77,16 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     */
   override def dataType: DataType = new StructType()
     .add(Constants.NAMESPACE, StringType, false)
-    .add(Constants.ARTIFACT_NAME, StringType, true)
-    .add(Constants.ARTIFACT_SCOPE, StringType, true)
-    .add(Constants.ARTIFACT_VERSION, StringType, true)
+    .add(Constants.ARTIFACT_NAME, StringType, false)
+    .add(Constants.ARTIFACT_SCOPE, StringType, false)
+    .add(Constants.ARTIFACT_VERSION, StringType, false)
     .add(Constants.APPLICATION_NAME, StringType, false)
     .add(Constants.APPLICATION_VERSION, StringType, false)
     .add(Constants.PROGRAM_TYPE, StringType, false)
     .add(Constants.PROGRAM, StringType, false)
     .add(Constants.RUN, StringType, false)
     .add(Constants.STATUS, StringType, false)
-    .add(Constants.START, LongType, true)
+    .add(Constants.START, LongType, false)
     .add(Constants.RUNNING, LongType, true)
     .add(Constants.END, LongType, true)
     .add(Constants.DURATION, LongType, true)
@@ -135,7 +135,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
       TimeUnit.MILLISECONDS.toSeconds(row.getAs[Long](Constants.TIME))))
     // Get the StartInfo from the buffer if it exists or construct a new StartInfo from the input row
     val startInfo = Option(bufferRow.getAs[Row](Constants.START_INFO))
-      .orElse(Option(row.getAs[Row](Constants.START_INFO)).map(convertInputStartInfoRow))
+      .orElse(Option(row.getAs[Row](Constants.START_INFO)))
     buffer.update(bufferRow.fieldIndex(Constants.START_INFO), startInfo)
   }
 
@@ -207,13 +207,14 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     val end = statusTimeMap.filterKeys(END_STATUSES.contains).values
       .reduceOption(Math.min(_, _)) // avoid compilation error with Math.min(_, _) instead of Math.min
     val startInfo = Option(bufferRow.getAs[Row](Constants.START_INFO))
+    val artifactInfo = startInfo.map(_.getAs[Row](Constants.ARTIFACT_ID))
     val duration = end.flatMap(e => start.map(e - _))
     val runtimeArgs = startInfo.map(_.getAs[Map[String, String]](Constants.RUNTIME_ARGUMENTS))
     val startMethod = getStartMethod(runtimeArgs).name()
     val r = Row(bufferRow.getAs[String](Constants.NAMESPACE),
-      startInfo.map(_.getAs[String](Constants.ARTIFACT_NAME)).orNull,
-      startInfo.map(_.getAs[String](Constants.ARTIFACT_VERSION)).orNull,
-      startInfo.map(_.getAs[String](Constants.ARTIFACT_SCOPE)).orNull,
+      artifactInfo.map(_.getAs[String](Constants.ARTIFACT_NAME)).orNull,
+      artifactInfo.map(_.getAs[String](Constants.ARTIFACT_SCOPE)).orNull,
+      artifactInfo.map(_.getAs[String](Constants.ARTIFACT_VERSION)).orNull,
       bufferRow.getAs[String](Constants.APPLICATION_NAME),
       bufferRow.getAs[String](Constants.APPLICATION_VERSION),
       bufferRow.getAs[String](Constants.PROGRAM_TYPE), bufferRow.getAs[String](Constants.PROGRAM),
@@ -246,21 +247,6 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
       case _ => ProgramRunStartMethod.TRIGGERED
     }
   }
-
-  /**
-    * Converts the row with schema [[INPUT_START_INFO_SCHEMA]] from an input row to a row
-    * with with schema [[BUFFER_START_INFO_SCHEMA]] in the buffer.
-    *
-    * @param startInfoRow the original row with schema [[INPUT_START_INFO_SCHEMA]]
-    * @return a row with schema [[BUFFER_START_INFO_SCHEMA]]
-    */
-  private def convertInputStartInfoRow(startInfoRow: Row): Row = {
-    val artifact: Row = startInfoRow.getAs[Row](Constants.ARTIFACT_ID)
-    Row(startInfoRow.getAs[String](Constants.USER),
-      startInfoRow.getAs[scala.collection.Map[String, String]](Constants.RUNTIME_ARGUMENTS),
-      artifact.getAs[String](Constants.ARTIFACT_NAME), artifact.getAs[String](Constants.ARTIFACT_VERSION),
-      artifact.getAs[String](Constants.ARTIFACT_SCOPE))
-  }
 }
 
 object ReportAggregationFunction {
@@ -276,11 +262,5 @@ object ReportAggregationFunction {
     .add(Constants.USER, StringType, true)
     .add(Constants.RUNTIME_ARGUMENTS, MapType(StringType, StringType), false)
     .add(Constants.ARTIFACT_ID, ARTIFACT_SCHEMA, false)
-  val BUFFER_START_INFO_SCHEMA = new StructType()
-    .add(Constants.USER, StringType, true)
-    .add(Constants.RUNTIME_ARGUMENTS, MapType(StringType, StringType), false)
-    .add(Constants.ARTIFACT_NAME, StringType, false)
-    .add(Constants.ARTIFACT_SCOPE, StringType, false)
-    .add(Constants.ARTIFACT_VERSION, StringType, false)
   val GSON = TriggeringScheduleInfoAdapter.addTypeAdapters(new GsonBuilder).create()
 }
