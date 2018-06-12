@@ -236,6 +236,7 @@ object ReportAggregationFunction {
     .add(Constants.ARTIFACT_SCOPE, StringType, false)
     .add(Constants.ARTIFACT_VERSION, StringType, false)
   val INPUT_START_INFO_SCHEMA = new StructType()
+    // TODO: [CDAP-13541] USER filed is null if authentication is disabled
     .add(Constants.USER, StringType, true)
     .add(Constants.RUNTIME_ARGUMENTS, MapType(StringType, StringType), false)
     .add(Constants.ARTIFACT_ID, ARTIFACT_SCHEMA, false)
