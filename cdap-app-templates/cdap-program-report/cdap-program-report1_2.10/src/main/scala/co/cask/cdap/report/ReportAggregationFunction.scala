@@ -35,6 +35,10 @@ import org.slf4j.LoggerFactory
 class ReportAggregationFunction extends UserDefinedAggregateFunction {
   import ReportAggregationFunction._
 
+  /**
+    * A [[StructType]] represents data types of input arguments of this aggregate function.
+    * This schema should be identical to the schema in [[co.cask.cdap.report.main.ProgramRunInfoSerializer.SCHEMA]]
+    */
   override def inputSchema: StructType = new StructType()
     .add(Constants.NAMESPACE, StringType, false)
     .add(Constants.APPLICATION_NAME, StringType, false)
@@ -45,8 +49,15 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     .add(Constants.STATUS, StringType, false)
     .add(Constants.TIME, LongType, false)
     .add(Constants.MESSAGE_ID, StringType, false)
+    // the START_INFO field is nullable
     .add(Constants.START_INFO, INPUT_START_INFO_SCHEMA, true)
 
+  /**
+    * A [[StructType]] represents data types of values in the aggregation buffer.
+    * Intermediate aggregation results will be stored in the aggregation buffer. This buffer schema is almost identical
+    * to the [[inputSchema]] except that it contains a field [[STATUSES]] with tuples of status and time
+    * aggregated from inputs with the same program run ID.
+    */
   override def bufferSchema: StructType = new StructType()
     .add(Constants.NAMESPACE, StringType, false)
     .add(Constants.APPLICATION_NAME, StringType, false)
@@ -57,9 +68,13 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     .add(STATUSES, ArrayType(new StructType()
       .add(Constants.STATUS, StringType, false)
       .add(Constants.TIME, LongType)), false)
-    .add(Constants.START_INFO, BUFFER_START_INFO_SCHEMA,
-      true)
+    // the START_INFO field is nullable
+    .add(Constants.START_INFO, BUFFER_START_INFO_SCHEMA, true)
 
+  /**
+    * The [[DataType]] of the returned value of this [[UserDefinedAggregateFunction]]. It contains all the possible
+    * fields that can be included in a program run report.
+    */
   override def dataType: DataType = new StructType()
     .add(Constants.NAMESPACE, StringType, false)
     .add(Constants.ARTIFACT_NAME, StringType, true)
@@ -82,8 +97,15 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     .add(Constants.NUM_LOG_ERRORS, IntegerType, true)
     .add(Constants.NUM_RECORDS_OUT, IntegerType, true)
 
+  /**
+    * Always returns true to indicate this function is deterministic, i.e. given the same input,
+    * always return the same output.
+    */
   override def deterministic: Boolean = true
 
+  /**
+    * Initializes the given aggregation buffer with empty values.
+    */
   override def initialize(buffer: MutableAggregationBuffer): Unit = {
     val bufferRow = new GenericRowWithSchema(buffer.toSeq.toArray, bufferSchema)
     buffer.update(bufferRow.fieldIndex(Constants.NAMESPACE), "")
@@ -93,8 +115,15 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     buffer.update(bufferRow.fieldIndex(Constants.PROGRAM), "")
     buffer.update(bufferRow.fieldIndex(Constants.RUN), "")
     buffer.update(bufferRow.fieldIndex(STATUSES), Seq.empty[Row])
+    // leave the START_INFO field as null
   }
 
+  /**
+    * Updates the given aggregation buffer `buffer` with new input data from `input`.
+    * For [[STATUSES]] field in the buffer, append status and time from the input to it.
+    * Only updates the [[Constants.START_INFO]] field in the `buffer` iff the existing [[Constants.START_INFO]] field
+    * is null in the `buffer`.
+    */
   override def update(buffer: MutableAggregationBuffer, input: Row): Unit = {
     val bufferRow = new GenericRowWithSchema(buffer.toSeq.toArray, bufferSchema)
     val row = new GenericRowWithSchema(input.toSeq.toArray, inputSchema)
@@ -111,7 +140,8 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
   }
 
   /**
-    * For each field in the given fields, updates each field in the buffer with the String value from the corresponding column in the given row.
+    * For each field in the given fields, updates each field in the buffer with the String value
+    * from the corresponding column in the given row.
     *
     * @param buffer the buffer to be updated
     * @param bufferRow a row constructed with schema from the buffer to be updated
@@ -123,6 +153,10 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     fields.foreach(field => buffer.update(bufferRow.fieldIndex(field), row.getAs[String](field)))
   }
 
+  /**
+    * For each empty field in `buffer1`, update the value of the same field from `buffer2`, except for t
+    * he [[STATUSES]] field. [[STATUSES]] field from both buffers are combined.
+    */
   override def merge(buffer1: MutableAggregationBuffer, buffer2: Row): Unit = {
     val buffer1Row = new GenericRowWithSchema(buffer1.toSeq.toArray, bufferSchema)
     val buffer2Row = new GenericRowWithSchema(buffer2.toSeq.toArray, bufferSchema)
@@ -136,7 +170,6 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
       buffer1.update(buffer1Row.fieldIndex(Constants.START_INFO), buffer2Row.getAs[Row](Constants.START_INFO))
     }
   }
-
 
   /**
     * For each field in the given fields, update each field in the first buffer with the String value from
@@ -154,6 +187,11 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     })
   }
 
+  /**
+    * Calculates the final result of this [[UserDefinedAggregateFunction]] based on the given
+    * aggregation buffer, and return a row with schema [[dataType]], which corresponds to all possible fields in a
+    * program run report record.
+    */
   override def evaluate(buffer: Row): Row = {
     val bufferRow = new GenericRowWithSchema(buffer.toSeq.toArray, bufferSchema)
     // Construct a status to time map from the list of status time tuples, by keeping the earliest time of a status
@@ -188,7 +226,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
   }
 
   /**
-    * Returns how the program run was started
+    * Returns how the program run was started.
     *
     * @param runtimeArgs the runtime arguments of the program run
     * @return one of the methods [[ProgramRunStartMethod.MANUAL]], [[ProgramRunStartMethod.SCHEDULED]]
