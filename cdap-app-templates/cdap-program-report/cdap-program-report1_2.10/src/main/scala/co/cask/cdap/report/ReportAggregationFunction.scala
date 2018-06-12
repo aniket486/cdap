@@ -126,30 +126,30 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     */
   override def update(buffer: MutableAggregationBuffer, input: Row): Unit = {
     val bufferRow = new GenericRowWithSchema(buffer.toSeq.toArray, bufferSchema)
-    val row = new GenericRowWithSchema(input.toSeq.toArray, inputSchema)
-    updateBufferWithRow(buffer, bufferRow, row, STRING_TYPE_FIELDS)
+    val inputRow = new GenericRowWithSchema(input.toSeq.toArray, inputSchema)
+    updateBufferWithRow(buffer, bufferRow, inputRow, STRING_TYPE_FIELDS)
     // append status and time from the input row to statuses field in the buffer
     buffer.update(bufferRow.fieldIndex(STATUSES),
-      bufferRow.getAs[Seq[Row]](STATUSES) :+ Row(row.getAs(Constants.STATUS),
-        TimeUnit.MILLISECONDS.toSeconds(row.getAs[Long](Constants.TIME))))
+      bufferRow.getAs[Seq[Row]](STATUSES) :+ Row(inputRow.getAs(Constants.STATUS),
+        TimeUnit.MILLISECONDS.toSeconds(inputRow.getAs[Long](Constants.TIME))))
     // Get the StartInfo from the buffer if it exists or construct a new StartInfo from the input row
     if (Option(bufferRow.getAs[Row](Constants.START_INFO)).isEmpty) {
-      buffer.update(bufferRow.fieldIndex(Constants.START_INFO), row.getAs[Row](Constants.START_INFO))
+      buffer.update(bufferRow.fieldIndex(Constants.START_INFO), inputRow.getAs[Row](Constants.START_INFO))
     }
   }
 
   /**
-    * For each field in the given fields, updates each field in the buffer with the String value
-    * from the corresponding column in the given row.
+    * For each field in `fields`, `buffer` is updated with the field value in `inputRow` if the `bufferRow`
+    * (constructed based on `buffer`) doesn't have a value for this field.
     *
     * @param buffer the buffer to be updated
-    * @param bufferRow a row constructed with schema from the buffer to be updated
-    * @param row the row to get value from
+    * @param bufferRow a row constructed with schema of the `buffer` to be updated
+    * @param inputRow the row to get value from
     * @param fields the field names in the buffer as well as column name in the row
     */
   private def updateBufferWithRow(buffer: MutableAggregationBuffer, bufferRow: GenericRowWithSchema,
-                                  row: GenericRowWithSchema, fields: Seq[String]): Unit = {
-    fields.foreach(field => buffer.update(bufferRow.fieldIndex(field), row.getAs[String](field)))
+                                  inputRow: GenericRowWithSchema, fields: Seq[String]): Unit = {
+    fields.foreach(field => buffer.update(bufferRow.fieldIndex(field), inputRow.getAs[String](field)))
   }
 
   /**
