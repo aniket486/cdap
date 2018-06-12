@@ -18,10 +18,7 @@ package co.cask.cdap.report
 
 import java.util.concurrent.TimeUnit
 
-import co.cask.cdap.api.schedule.{TriggerInfo, TriggeringScheduleInfo}
-import co.cask.cdap.report.proto.ProgramRunStartMethod
-import co.cask.cdap.report.util.{Constants, TriggeringScheduleInfoAdapter}
-import com.google.gson.GsonBuilder
+import co.cask.cdap.report.util.{Constants, ProgramStartMethodHelper}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.GenericRowWithSchema
 import org.apache.spark.sql.expressions.{MutableAggregationBuffer, UserDefinedAggregateFunction}
@@ -29,10 +26,17 @@ import org.apache.spark.sql.types._
 import org.slf4j.LoggerFactory
 
 /**
-  * An aggregation function that aggregates [[Row]]'s with the same program run ID into intermediate
-  * [[MutableAggregationBuffer]]'s and finally merge the [[MutableAggregationBuffer]]'s to build a single [[Row]]
+  * An aggregation function that aggregates [[Row]]'s with schema [[inputSchema]] belonging to the same group
+  * into a single [[Row]] with schema [[dataType]]. Firstly, [[initialize()]] is called to initialize
+  * intermediate [[MutableAggregationBuffer]]'s with schema [[bufferSchema]]. Then for each input [[Row]],
+  * [[update()]] is called to update the corresponding [[MutableAggregationBuffer]] with values from the input [[Row]].
+  * Next, [[merge()]] is called to merge all [[MutableAggregationBuffer]]'s belonging to the same group into a
+  * single [[MutableAggregationBuffer]]. Finally, [[evaluate()]] is called to convert the merged
+  * [[MutableAggregationBuffer]] of each group into a final [[Row]] with schema [[dataType]] as the output of this
+  * aggregation function.
   */
 class ReportAggregationFunction extends UserDefinedAggregateFunction {
+
   import ReportAggregationFunction._
 
   /**
@@ -49,7 +53,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     .add(Constants.STATUS, StringType, false)
     .add(Constants.TIME, LongType, false)
     .add(Constants.MESSAGE_ID, StringType, false)
-    // the START_INFO field is nullable
+    // the START_INFO field is nullable, it is only available on records with status STARTING
     .add(Constants.START_INFO, INPUT_START_INFO_SCHEMA, true)
 
   /**
@@ -65,10 +69,9 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     .add(Constants.PROGRAM_TYPE, StringType, false)
     .add(Constants.PROGRAM, StringType, false)
     .add(Constants.RUN, StringType, false)
-    .add(STATUSES, ArrayType(new StructType()
-      .add(Constants.STATUS, StringType, false)
-      .add(Constants.TIME, LongType)), false)
-    // the START_INFO field is nullable
+    .add(STATUSES, ArrayType(STATUS_TIME_SCHEMA), false)
+    // the START_INFO field is nullable, it is only available after the buffer is updated with
+    // input row with status STARTING
     .add(Constants.START_INFO, INPUT_START_INFO_SCHEMA, true)
 
   /**
@@ -108,12 +111,9 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     */
   override def initialize(buffer: MutableAggregationBuffer): Unit = {
     val bufferRow = new GenericRowWithSchema(buffer.toSeq.toArray, bufferSchema)
-    buffer.update(bufferRow.fieldIndex(Constants.NAMESPACE), "")
-    buffer.update(bufferRow.fieldIndex(Constants.APPLICATION_NAME), "")
-    buffer.update(bufferRow.fieldIndex(Constants.APPLICATION_VERSION), "")
-    buffer.update(bufferRow.fieldIndex(Constants.PROGRAM_TYPE), "")
-    buffer.update(bufferRow.fieldIndex(Constants.PROGRAM), "")
-    buffer.update(bufferRow.fieldIndex(Constants.RUN), "")
+    // initialize every String type field with an empty String
+    STRING_TYPE_FIELDS.foreach(field => buffer.update(bufferRow.fieldIndex(field), ""))
+    // initialize the STATUSES field with an empty Seq
     buffer.update(bufferRow.fieldIndex(STATUSES), Seq.empty[Row])
     // leave the START_INFO field as null
   }
@@ -127,16 +127,15 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
   override def update(buffer: MutableAggregationBuffer, input: Row): Unit = {
     val bufferRow = new GenericRowWithSchema(buffer.toSeq.toArray, bufferSchema)
     val row = new GenericRowWithSchema(input.toSeq.toArray, inputSchema)
-    updateBufferWithRow(buffer, bufferRow, row, Constants.NAMESPACE, Constants.APPLICATION_NAME,
-      Constants.APPLICATION_VERSION, Constants.PROGRAM_TYPE, Constants.PROGRAM, Constants.RUN)
+    updateBufferWithRow(buffer, bufferRow, row, STRING_TYPE_FIELDS)
     // append status and time from the input row to statuses field in the buffer
     buffer.update(bufferRow.fieldIndex(STATUSES),
       bufferRow.getAs[Seq[Row]](STATUSES) :+ Row(row.getAs(Constants.STATUS),
-      TimeUnit.MILLISECONDS.toSeconds(row.getAs[Long](Constants.TIME))))
+        TimeUnit.MILLISECONDS.toSeconds(row.getAs[Long](Constants.TIME))))
     // Get the StartInfo from the buffer if it exists or construct a new StartInfo from the input row
-    val startInfo = Option(bufferRow.getAs[Row](Constants.START_INFO))
-      .orElse(Option(row.getAs[Row](Constants.START_INFO)))
-    buffer.update(bufferRow.fieldIndex(Constants.START_INFO), startInfo)
+    if (Option(bufferRow.getAs[Row](Constants.START_INFO)).isEmpty) {
+      buffer.update(bufferRow.fieldIndex(Constants.START_INFO), row.getAs[Row](Constants.START_INFO))
+    }
   }
 
   /**
@@ -149,7 +148,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     * @param fields the field names in the buffer as well as column name in the row
     */
   private def updateBufferWithRow(buffer: MutableAggregationBuffer, bufferRow: GenericRowWithSchema,
-                                  row: GenericRowWithSchema, fields: String*): Unit = {
+                                  row: GenericRowWithSchema, fields: Seq[String]): Unit = {
     fields.foreach(field => buffer.update(bufferRow.fieldIndex(field), row.getAs[String](field)))
   }
 
@@ -160,9 +159,10 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
   override def merge(buffer1: MutableAggregationBuffer, buffer2: Row): Unit = {
     val buffer1Row = new GenericRowWithSchema(buffer1.toSeq.toArray, bufferSchema)
     val buffer2Row = new GenericRowWithSchema(buffer2.toSeq.toArray, bufferSchema)
-    mergeBuffers(buffer1, buffer1Row, buffer2Row, Constants.NAMESPACE, Constants.APPLICATION_NAME,
-      Constants.APPLICATION_VERSION, Constants.PROGRAM_TYPE, Constants.PROGRAM, Constants.RUN)
-    // update statuses in buffer1 by combining the statuses from both buffer1 and buffer2
+    mergeBuffers(buffer1, buffer1Row, buffer2Row, STRING_TYPE_FIELDS)
+    // update statuses in buffer1 by combining the statuses from both buffer1 and buffer2,
+    // since STATUSES are initialized as empty Seq, no need to check for empty since ++ with an empty Seq
+    // is a legal no-op operation
     buffer1.update(buffer1Row.fieldIndex(STATUSES),
       buffer1Row.getAs[Seq[Row]](STATUSES) ++ buffer2Row.getAs[Seq[Row]](STATUSES))
     // update start info in buffer1 if it's empty
@@ -181,7 +181,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     * @param fields the field names
     */
   private def mergeBuffers(buffer1: MutableAggregationBuffer, buffer1Row: GenericRowWithSchema,
-                           buffer2Row: GenericRowWithSchema, fields: String*): Unit = {
+                           buffer2Row: GenericRowWithSchema, fields: Seq[String]): Unit = {
     fields.foreach(field => if (buffer1Row.getAs[String](field).isEmpty) {
       buffer1.update(buffer1Row.fieldIndex(field), buffer2Row.getAs[String](field))
     })
@@ -200,7 +200,7 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
       (v._1, v._2.map(_.getAs[Long](Constants.TIME)).min))
 
     // get the status with maximum time as the status
-    val status = statusTimeMap.max(Ordering[Long].on[(_,Long)](_._2))._1
+    val status = statusTimeMap.max(Ordering[Long].on[(_, Long)](_._2))._1
     val start = statusTimeMap.get("STARTING")
     val running = statusTimeMap.get("RUNNING")
     // Get the earliest status with one of the ending statuses
@@ -210,8 +210,8 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
     val artifactInfo = startInfo.map(_.getAs[Row](Constants.ARTIFACT_ID))
     val duration = end.flatMap(e => start.map(e - _))
     val runtimeArgs = startInfo.map(_.getAs[Map[String, String]](Constants.RUNTIME_ARGUMENTS))
-    val startMethod = getStartMethod(runtimeArgs).name()
-    val r = Row(bufferRow.getAs[String](Constants.NAMESPACE),
+    val startMethod = ProgramStartMethodHelper.getStartMethod(runtimeArgs).name()
+    Row(bufferRow.getAs[String](Constants.NAMESPACE),
       artifactInfo.map(_.getAs[String](Constants.ARTIFACT_NAME)).orNull,
       artifactInfo.map(_.getAs[String](Constants.ARTIFACT_SCOPE)).orNull,
       artifactInfo.map(_.getAs[String](Constants.ARTIFACT_VERSION)).orNull,
@@ -221,31 +221,6 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
       bufferRow.getAs[String](Constants.RUN), status,
       start, running, end, duration, startInfo.map(_.getAs[String](Constants.USER)).orNull,
       startMethod, runtimeArgs.orNull, 0, 0, 0)
-    LOG.trace("RecordBuilder = {}", buffer)
-    LOG.trace("Record = {}", r)
-    r
-  }
-
-  /**
-    * Returns how the program run was started.
-    *
-    * @param runtimeArgs the runtime arguments of the program run
-    * @return one of the methods [[ProgramRunStartMethod.MANUAL]], [[ProgramRunStartMethod.SCHEDULED]]
-    *         and [[ProgramRunStartMethod.TRIGGERED]] each indicating that the program run
-    *         was started manually, scheduled by time, or triggered by certain condition such as new dataset partition
-    *         and program status.
-    */
-  private def getStartMethod(runtimeArgs: Option[scala.collection.Map[String, String]]): ProgramRunStartMethod = {
-    if (runtimeArgs.isEmpty) return ProgramRunStartMethod.MANUAL
-    val scheduleInfoJson = runtimeArgs.get.get(SCHEDULE_INFO_KEY)
-    if (scheduleInfoJson.isEmpty) return ProgramRunStartMethod.MANUAL
-    val scheduleInfo: TriggeringScheduleInfo = GSON.fromJson(scheduleInfoJson.get, classOf[TriggeringScheduleInfo])
-    val triggers = scheduleInfo.getTriggerInfos
-    if (Option(triggers).isEmpty || triggers.isEmpty) return ProgramRunStartMethod.MANUAL
-    triggers.get(0).getType match {
-      case TriggerInfo.Type.TIME => ProgramRunStartMethod.SCHEDULED
-      case _ => ProgramRunStartMethod.TRIGGERED
-    }
   }
 }
 
@@ -254,6 +229,8 @@ object ReportAggregationFunction {
   val STATUSES = "statuses"
   val END_STATUSES = Set("COMPLETED", "KILLED", "FAILED")
   val SCHEDULE_INFO_KEY = "triggeringScheduleInfo"
+  val STRING_TYPE_FIELDS = Seq(Constants.NAMESPACE, Constants.APPLICATION_NAME,
+    Constants.APPLICATION_VERSION, Constants.PROGRAM_TYPE, Constants.PROGRAM, Constants.RUN)
   val ARTIFACT_SCHEMA = new StructType()
     .add(Constants.ARTIFACT_NAME, StringType, false)
     .add(Constants.ARTIFACT_SCOPE, StringType, false)
@@ -262,5 +239,7 @@ object ReportAggregationFunction {
     .add(Constants.USER, StringType, true)
     .add(Constants.RUNTIME_ARGUMENTS, MapType(StringType, StringType), false)
     .add(Constants.ARTIFACT_ID, ARTIFACT_SCHEMA, false)
-  val GSON = TriggeringScheduleInfoAdapter.addTypeAdapters(new GsonBuilder).create()
+  val STATUS_TIME_SCHEMA = new StructType()
+    .add(Constants.STATUS, StringType, false)
+    .add(Constants.TIME, LongType)
 }
