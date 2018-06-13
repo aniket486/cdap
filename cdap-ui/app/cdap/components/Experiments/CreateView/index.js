@@ -188,9 +188,15 @@ export default class ExperimentCreateView extends Component {
         Update Model
       </div>
     );
+    const {experimentId, addModel} = queryString.parse(this.props.location.search);
+    let popoverElementLabel = 'Create experiment';
+
+    if (addModel) {
+      popoverElementLabel = 'Add model';
+    }
     const popoverElement = (
       <div className="btn btn-primary">
-        Add a model
+        {popoverElementLabel}
       </div>
     );
     const createModelBtn = (
@@ -205,18 +211,22 @@ export default class ExperimentCreateView extends Component {
       </Popover>
     );
 
-    const {experimentId, addModel} = queryString.parse(this.props.location.search);
+
     let topPanelTitle = 'Create a new experiment';
     if (addModel) {
       topPanelTitle = `Add model to '${experimentId}'`;
     }
+    const renderAddBtn = () => {
+      if (!this.state.workspaceId) {
+        return null;
+      }
+      return this.state.modelId ? updateModelBtn : createModelBtn;
+    };
     return (
       <span>
         {this.renderTopPanel(topPanelTitle)}
         <div className="experiments-model-panel">
-          {
-            this.state.modelId ? updateModelBtn : createModelBtn
-          }
+          {renderAddBtn()}
         </div>
         <DataPrepHome
           singleWorkspaceMode={true}
