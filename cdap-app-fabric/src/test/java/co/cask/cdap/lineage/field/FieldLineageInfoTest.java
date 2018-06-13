@@ -404,11 +404,13 @@ public class FieldLineageInfoTest {
     // parse: (merge.body) -> (name,address)
     // write: (parse.name, parse.address, merge.offset) -> file
 
-    ReadOperation read1 = new ReadOperation("read1", "Reading from file1", EndPoint.of("ns1", "file1"),
-                                            "offset", "body");
+    EndPoint read1EndPoint = EndPoint.of("ns1", "file1");
+    EndPoint read2EndPoint = EndPoint.of("ns2", "file2");
+    EndPoint fileEndPoint = EndPoint.of("ns3", "file");
 
-    ReadOperation read2 = new ReadOperation("read2", "Reading from file2", EndPoint.of("ns2", "file2"),
-                                            "offset", "body");
+    ReadOperation read1 = new ReadOperation("read1", "Reading from file1", read1EndPoint, "offset", "body");
+
+    ReadOperation read2 = new ReadOperation("read2", "Reading from file2", read2EndPoint, "offset", "body");
 
     TransformOperation merge = new TransformOperation("merge", "merging fields",
                                                       Arrays.asList(InputField.of("read1", "offset"),
@@ -420,7 +422,7 @@ public class FieldLineageInfoTest {
                                                       Collections.singletonList(InputField.of("merge", "body")),
                                                       "name", "address");
 
-    WriteOperation write = new WriteOperation("write", "writing to another file", EndPoint.of("ns3", "file1"),
+    WriteOperation write = new WriteOperation("write", "writing to another file", fileEndPoint,
                                               Arrays.asList(InputField.of("merge", "offset"),
                                                             InputField.of("parse", "name"),
                                                             InputField.of("parse", "address")));
@@ -431,72 +433,34 @@ public class FieldLineageInfoTest {
     operations.add(read1);
     operations.add(read2);
     operations.add(write);
+    FieldLineageInfo fllInfo = new FieldLineageInfo(operations);
 
-    FieldLineageInfo info = new FieldLineageInfo(operations);
-  }
+    Map<EndPoint, Set<String>> destinationFields = fllInfo.getDestinationFields();
+    Assert.assertEquals(1, destinationFields.size());
+    Assert.assertEquals(new HashSet<>(Arrays.asList("name", "address", "offset")), destinationFields.get(fileEndPoint));
 
-  @Test
-  public void testMultiPathOutputFieldLineage() {
-    // read1: file1 -> (offset, body)
-    // read2: file2 -> (offset, body)
-    // merge1: (read1.offset, read1.body, read2.offset, read2.body) -> (offset, body)
-    // parse1: (merge.body) -> (name, address)
-    // read3: file3 -> (offset, body)
-    // parse2: (read3.body) -> (name, address)
-    // merge2: (parse1.name, parse1.address, parse2.name, parse2.address) -> (name, address)
-    // write1: (merge2.name, merge2.address, merge.offset) -> file
-    // write2: (parse2.name, parse2.address) -> another_file
+    Map<EndPointField, Set<EndPointField>> incomingSummary = fllInfo.getIncomingSummary();
+    Assert.assertEquals(3, incomingSummary.size());
 
-    ReadOperation read1 = new ReadOperation("read1", "Reading from file1", EndPoint.of("ns1", "file1"),
-                                            "offset", "body");
+    Set<EndPointField> expectedSet = new HashSet<>();
+    expectedSet.add(new EndPointField(read1EndPoint, "body"));
+    expectedSet.add(new EndPointField(read1EndPoint, "offset"));
+    expectedSet.add(new EndPointField(read2EndPoint, "body"));
+    expectedSet.add(new EndPointField(read2EndPoint, "offset"));
+    Assert.assertEquals(expectedSet, incomingSummary.get(new EndPointField(fileEndPoint, "name")));
+    Assert.assertEquals(expectedSet, incomingSummary.get(new EndPointField(fileEndPoint, "address")));
+    Assert.assertEquals(expectedSet, incomingSummary.get(new EndPointField(fileEndPoint, "offset")));
 
-    ReadOperation read2 = new ReadOperation("read2", "Reading from file2", EndPoint.of("ns2", "file2"),
-                                            "offset", "body");
+    Map<EndPointField, Set<EndPointField>> outgoingSummary = fllInfo.getOutgoingSummary();
+    Assert.assertEquals(4, outgoingSummary.size());
 
-    TransformOperation merge1 = new TransformOperation("merge1", "merging fields",
-                                                       Arrays.asList(InputField.of("read1", "offset"),
-                                                                     InputField.of("read2", "offset"),
-                                                                     InputField.of("read1", "body"),
-                                                                     InputField.of("read2", "body")), "offset", "body");
-
-    TransformOperation parse1 = new TransformOperation("parse1", "parsing merged fields between file1 and file2",
-                                                       Collections.singletonList(InputField.of("merge1", "body")),
-                                                       "name", "address");
-
-    ReadOperation read3 = new ReadOperation("read3", "Reading from file3", EndPoint.of("ns3", "file3"),
-                                            "offset", "body");
-
-    TransformOperation parse2 = new TransformOperation("parse2", "parsing body",
-                                                       Collections.singletonList(InputField.of("read3", "body")),
-                                                       "name", "address");
-
-    TransformOperation merge2 = new TransformOperation("merge2", "merging parsed fields",
-                                                       Arrays.asList(InputField.of("parse1", "name"),
-                                                                     InputField.of("parse2", "name"),
-                                                                     InputField.of("parse1", "address"),
-                                                                     InputField.of("parse2", "address")),
-                                                       "offset", "body");
-
-    WriteOperation write1 = new WriteOperation("write1", "writing to file", EndPoint.of("ns1", "another_file"),
-                                               Arrays.asList(InputField.of("merge2", "name"),
-                                                             InputField.of("merge2", "address"),
-                                                             InputField.of("merge1", "offset")));
-
-    WriteOperation write2 = new WriteOperation("write2", "writing to file", EndPoint.of("ns2", "another_file"),
-                                               Arrays.asList(InputField.of("parse2", "name"),
-                                                             InputField.of("parse2", "address")));
-
-    List<Operation> operations = new ArrayList<>();
-    operations.add(read1);
-    operations.add(read2);
-    operations.add(read3);
-    operations.add(merge1);
-    operations.add(merge2);
-    operations.add(parse1);
-    operations.add(parse2);
-    operations.add(write1);
-    operations.add(write2);
-
-    FieldLineageInfo info = new FieldLineageInfo(operations);
+    expectedSet = new HashSet<>();
+    expectedSet.add(new EndPointField(fileEndPoint, "offset"));
+    expectedSet.add(new EndPointField(fileEndPoint, "name"));
+    expectedSet.add(new EndPointField(fileEndPoint, "address"));
+    Assert.assertEquals(expectedSet, outgoingSummary.get(new EndPointField(read1EndPoint, "offset")));
+    Assert.assertEquals(expectedSet, outgoingSummary.get(new EndPointField(read1EndPoint, "body")));
+    Assert.assertEquals(expectedSet, outgoingSummary.get(new EndPointField(read2EndPoint, "offset")));
+    Assert.assertEquals(expectedSet, outgoingSummary.get(new EndPointField(read2EndPoint, "body")));
   }
 }
