@@ -169,13 +169,19 @@ const renderFeaturesTable = (features) => {
   );
 };
 
-const renderDirectivesTables = (directives) => {
+const renderDirectivesTables = (directives, model) => {
+  const copyableDirectives = directives.join('\n');
   return (
     <div className="grid-wrapper">
       <div className="grid grid-container directives-list">
         <div className="grid-header">
           <div className="grid-row">
-            <strong> Directives </strong>
+            <strong> Directives ({directives.length})</strong>
+            <CopyableID
+              label="Copy to Clipboard"
+              id={copyableDirectives}
+              tooltipText={`Directives for "${model}"`}
+            />
           </div>
         </div>
         <div className="grid-body">
@@ -239,7 +245,7 @@ const renderModelDetails = (model, newlyTrainingModel, experimentId) => {
           <div>
             <CollapsibleWrapper
               content={directives.length}
-              popoverContent={renderDirectivesTables.bind(null, directives)}
+              popoverContent={renderDirectivesTables.bind(null, directives, model.name)}
               alwaysShowViewLink={true}
             />
           </div>
