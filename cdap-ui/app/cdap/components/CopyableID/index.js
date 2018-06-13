@@ -33,11 +33,12 @@ export default class CopyableID extends Component {
     idprefix: PropTypes.string,
     label: PropTypes.string,
     placement: PropTypes.string,
-    tooltipText: PropTypes.string
+    tooltipText: PropTypes.oneOfType([PropTypes.string, PropTypes.bool])
   };
 
   static defaultProps = {
-    label: T.translate(`${PREFIX}.label`)
+    label: T.translate(`${PREFIX}.label`),
+    tooltipText: true
   };
 
   state = {
@@ -51,7 +52,12 @@ export default class CopyableID extends Component {
   }
 
   renderToolTipText() {
-    if (this.props.tooltipText) {
+
+    if (!this.props.tooltipText) {
+      return null;
+    }
+
+    if (typeof this.props.tooltipText === 'string' && this.props.tooltipText) {
       return this.props.tooltipText;
     }
     if (this.props.id) {
@@ -59,13 +65,12 @@ export default class CopyableID extends Component {
     }
     return T.translate(`${PREFIX}.notAvailable`);
   }
-  render() {
-    let idlabel = `A-${uuid()}`;
-    if (this.props.idprefix) {
-      idlabel = `${this.props.idprefix}-${this.props.id}`;
+
+  renderTooltip(idlabel) {
+    if (!this.props.tooltipText && !this.state.showTooltip) {
+      return null;
     }
-    // FIXME: Not sure how else to do this. Looks adhoc. Need this for copy to clipboard.
-    new Clipboard(`#${idlabel}`);
+
     let tetherConfig = {
       classPrefix: 'copyable-id-tooltip'
     };
@@ -79,6 +84,31 @@ export default class CopyableID extends Component {
       tooltipProps.isOpen = true;
     }
     return (
+      <UncontrolledTooltip
+        {...tooltipProps}
+      >
+        <span>{this.renderToolTipText()}</span>
+        {
+          this.state.showTooltip ?
+            <span className="copied-label text-success">
+              <IconSVG name="icon-check-circle" />
+              <span>{T.translate(`${PREFIX}.copiedLabel`)}</span>
+            </span>
+          :
+            null
+        }
+      </UncontrolledTooltip>
+    );
+  }
+
+  render() {
+    let idlabel = `A-${uuid()}`;
+    if (this.props.idprefix) {
+      idlabel = `${this.props.idprefix}-${this.props.id}`;
+    }
+    // FIXME: Not sure how else to do this. Looks adhoc. Need this for copy to clipboard.
+    new Clipboard(`#${idlabel}`);
+    return (
       <span
         className="copyable-id btn-link"
         id={idlabel}
@@ -89,20 +119,7 @@ export default class CopyableID extends Component {
         data-clipboard-text={this.props.id}
       >
         <span>{this.props.label}</span>
-        <UncontrolledTooltip
-          {...tooltipProps}
-        >
-          <span>{this.renderToolTipText()}</span>
-          {
-            this.state.showTooltip ?
-              <span className="copied-label text-success">
-                <IconSVG name="icon-check-circle" />
-                <span>{T.translate(`${PREFIX}.copiedLabel`)}</span>
-              </span>
-            :
-              null
-          }
-        </UncontrolledTooltip>
+        {this.renderTooltip(idlabel)}
       </span>
     );
   }
