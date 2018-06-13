@@ -23,7 +23,7 @@ import DataPrepHome from 'components/DataPrepHome';
 import {Prompt, Link, Redirect} from 'react-router-dom';
 import createExperimentStore, {CREATION_STEPS} from 'components/Experiments/store/createExperimentStore';
 import {getCurrentNamespace} from 'services/NamespaceStore';
-import UncontrolledPopover from 'components/UncontrolledComponents/Popover';
+import Popover from 'components/Popover';
 import ExperimentPopovers from 'components/Experiments/CreateView/Popovers';
 import DataPrepStore from 'components/DataPrep/store';
 import {
@@ -194,15 +194,15 @@ export default class ExperimentCreateView extends Component {
       </div>
     );
     const createModelBtn = (
-      <UncontrolledPopover
-        popoverElement={popoverElement}
-        tag="div"
-        tetherOption={{
-          classPrefix: 'create_new_experiment_popover',
-        }}
+      <Popover
+        target={() => popoverElement}
+        enableInteractionInPopover={true}
+        targetDimension={{ width: "auto" }}
+        placement="bottom"
+        className="create_new_experiment_popover"
       >
         <ExperimentPopovers />
-      </UncontrolledPopover>
+      </Popover>
     );
 
     const {experimentId, addModel} = queryString.parse(this.props.location.search);
