@@ -21,6 +21,7 @@ import {UncontrolledTooltip} from 'components/UncontrolledComponents';
 import Clipboard from 'clipboard';
 import IconSVG from 'components/IconSVG';
 import T from 'i18n-react';
+import uuid from 'uuid/v4';
 
 require('./CopyableID.scss');
 
@@ -31,7 +32,8 @@ export default class CopyableID extends Component {
     id: PropTypes.string.isRequired,
     idprefix: PropTypes.string,
     label: PropTypes.string,
-    placement: PropTypes.string
+    placement: PropTypes.string,
+    tooltipText: PropTypes.string
   };
 
   static defaultProps = {
@@ -47,8 +49,18 @@ export default class CopyableID extends Component {
       showTooltip: !this.state.showTooltip
     });
   }
+
+  renderToolTipText() {
+    if (this.props.tooltipText) {
+      return this.props.tooltipText;
+    }
+    if (this.props.id) {
+      return this.props.id;
+    }
+    return T.translate(`${PREFIX}.notAvailable`);
+  }
   render() {
-    let idlabel = `A-${this.props.id}`;
+    let idlabel = `A-${uuid()}`;
     if (this.props.idprefix) {
       idlabel = `${this.props.idprefix}-${this.props.id}`;
     }
@@ -80,7 +92,7 @@ export default class CopyableID extends Component {
         <UncontrolledTooltip
           {...tooltipProps}
         >
-          <span>{this.props.id || T.translate(`${PREFIX}.notAvailable`)}</span>
+          <span>{this.renderToolTipText()}</span>
           {
             this.state.showTooltip ?
               <span className="copied-label text-success">
