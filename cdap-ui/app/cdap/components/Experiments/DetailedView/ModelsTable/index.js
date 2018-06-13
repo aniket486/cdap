@@ -158,7 +158,7 @@ const renderFeaturesTable = (features) => {
       <div className="grid grid-container">
         <div className="grid-header">
           <div className="grid-row">
-            <strong> Features </strong>
+            <strong> Features ({features.length})</strong>
           </div>
         </div>
         <div className="grid-body">
