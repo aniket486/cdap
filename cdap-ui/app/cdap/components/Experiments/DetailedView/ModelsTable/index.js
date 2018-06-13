@@ -264,10 +264,6 @@ const renderModelDetails = (model, newlyTrainingModel, experimentId) => {
       </div>
       <div>
         <div>
-          <strong>Deployed on</strong>
-          <div>{model.deploytime === -1 ? '--' : humanReadableDate(model.deploytime)}</div>
-        </div>
-        <div>
           <strong> Created on</strong>
           <div>{humanReadableDate(model.createtime, true)}</div>
         </div>
