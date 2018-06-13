@@ -244,6 +244,159 @@ public class FieldLineageInfoTest {
   }
 
   @Test
+  public void testSourceToMultipleDestinations() {
+    // read: file -> (offset, body)
+    // parse: body -> (id, name, address, zip)
+    // write1: (parse.id, parse.name) -> info
+    // write2: (parse.address, parse.zip) -> location
+
+    EndPoint source = EndPoint.of("ns", "file");
+    EndPoint info = EndPoint.of("ns", "info");
+    EndPoint location = EndPoint.of("ns", "location");
+
+    ReadOperation read = new ReadOperation("read", "Reading from file", source, "offset", "body");
+    TransformOperation parse = new TransformOperation("parse", "parsing body",
+                                                      Collections.singletonList(InputField.of("read", "body")),
+                                                      "id", "name", "address", "zip");
+    WriteOperation infoWrite = new WriteOperation("infoWrite", "writing info", info,
+                                                  Arrays.asList(InputField.of("parse", "id"),
+                                                                InputField.of("parse", "name")));
+    WriteOperation locationWrite = new WriteOperation("locationWrite", "writing location", location,
+                                                      Arrays.asList(InputField.of("parse", "address"),
+                                                                    InputField.of("parse", "zip")));
+
+    List<Operation> operations = new ArrayList<>();
+    operations.add(read);
+    operations.add(parse);
+    operations.add(infoWrite);
+    operations.add(locationWrite);
+
+    FieldLineageInfo fllInfo = new FieldLineageInfo(operations);
+
+    Map<EndPoint, Set<String>> destinationFields = fllInfo.getDestinationFields();
+    Assert.assertEquals(2, destinationFields.size());
+    Assert.assertEquals(new HashSet<>(Arrays.asList("id", "name")), destinationFields.get(info));
+    Assert.assertEquals(new HashSet<>(Arrays.asList("address", "zip")), destinationFields.get(location));
+
+    Map<EndPointField, Set<EndPointField>> incomingSummary = fllInfo.getIncomingSummary();
+    Assert.assertEquals(4, incomingSummary.size());
+    EndPointField expected = new EndPointField(source, "body");
+    Assert.assertEquals(1, incomingSummary.get(new EndPointField(info, "id")).size());
+    Assert.assertEquals(expected, incomingSummary.get(new EndPointField(info, "id")).iterator().next());
+    Assert.assertEquals(1, incomingSummary.get(new EndPointField(info, "name")).size());
+    Assert.assertEquals(expected, incomingSummary.get(new EndPointField(info, "name")).iterator().next());
+    Assert.assertEquals(1, incomingSummary.get(new EndPointField(location, "address")).size());
+    Assert.assertEquals(expected, incomingSummary.get(new EndPointField(location, "address")).iterator().next());
+    Assert.assertEquals(1, incomingSummary.get(new EndPointField(location, "zip")).size());
+    Assert.assertEquals(expected, incomingSummary.get(new EndPointField(location, "zip")).iterator().next());
+
+    Map<EndPointField, Set<EndPointField>> outgoingSummary = fllInfo.getOutgoingSummary();
+    // Note that outgoing summary just contains 1 entry, because offset field from source
+    // is not contributing to any destination field
+    Assert.assertEquals(1, outgoingSummary.size());
+
+    Set<EndPointField> expectedSet = new HashSet<>();
+    expectedSet.add(new EndPointField(info, "id"));
+    expectedSet.add(new EndPointField(info, "name"));
+    expectedSet.add(new EndPointField(location, "address"));
+    expectedSet.add(new EndPointField(location, "zip"));
+    Assert.assertEquals(4, outgoingSummary.get(new EndPointField(source, "body")).size());
+    Assert.assertEquals(expectedSet, outgoingSummary.get(new EndPointField(source, "body")));
+  }
+
+  @Test
+  public void testMultiSourceSingleDestinationWithoutMerge() {
+    // pRead: personFile -> (offset, body)
+    // parse: body -> (id, name, address)
+    // cRead: codeFile -> id
+    // codeGen: (parse.id, cRead.id) -> id
+    // sWrite: (codeGen.id, parse.name, parse.address) -> secureStore
+    // iWrite: (parse.id, parse.name, parse.address) -> insecureStore
+
+    EndPoint pEndPoint = EndPoint.of("ns", "personFile");
+    EndPoint cEndPoint = EndPoint.of("ns", "codeFile");
+    EndPoint sEndPoint = EndPoint.of("ns", "secureStore");
+    EndPoint iEndPoint = EndPoint.of("ns", "insecureStore");
+
+    ReadOperation pRead = new ReadOperation("pRead", "Reading from person file", pEndPoint, "offset", "body");
+
+    ReadOperation cRead = new ReadOperation("cRead", "Reading from code file", cEndPoint, "id");
+
+    TransformOperation parse = new TransformOperation("parse", "parsing body",
+                                                      Collections.singletonList(InputField.of("pRead", "body")),
+                                                      "id", "name", "address");
+
+    TransformOperation codeGen = new TransformOperation("codeGen", "Generate secure code",
+                                                        Arrays.asList(InputField.of("parse", "id"),
+                                                                      InputField.of("cRead", "id")), "id");
+
+    WriteOperation sWrite = new WriteOperation("sWrite", "writing secure store", sEndPoint,
+                                               Arrays.asList(InputField.of("codeGen", "id"),
+                                                             InputField.of("parse", "name"),
+                                                             InputField.of("parse", "address")));
+
+    WriteOperation iWrite = new WriteOperation("iWrite", "writing insecure store", iEndPoint,
+                                               Arrays.asList(InputField.of("parse", "id"),
+                                                             InputField.of("parse", "name"),
+                                                             InputField.of("parse", "address")));
+
+    List<Operation> operations = new ArrayList<>();
+    operations.add(pRead);
+    operations.add(cRead);
+    operations.add(parse);
+    operations.add(codeGen);
+    operations.add(sWrite);
+    operations.add(iWrite);
+
+    FieldLineageInfo fllInfo = new FieldLineageInfo(operations);
+    Map<EndPoint, Set<String>> destinationFields = fllInfo.getDestinationFields();
+    Assert.assertEquals(new HashSet<>(Arrays.asList("id", "name", "address")), destinationFields.get(sEndPoint));
+    Assert.assertEquals(new HashSet<>(Arrays.asList("id", "name", "address")), destinationFields.get(iEndPoint));
+    Assert.assertNull(destinationFields.get(pEndPoint));
+
+    Map<EndPointField, Set<EndPointField>> incomingSummary = fllInfo.getIncomingSummary();
+    Assert.assertEquals(6, incomingSummary.size());
+    EndPointField expected = new EndPointField(pEndPoint, "body");
+    Assert.assertEquals(1, incomingSummary.get(new EndPointField(iEndPoint, "id")).size());
+    Assert.assertEquals(expected, incomingSummary.get(new EndPointField(iEndPoint, "id")).iterator().next());
+    Assert.assertEquals(1, incomingSummary.get(new EndPointField(iEndPoint, "name")).size());
+    Assert.assertEquals(expected, incomingSummary.get(new EndPointField(iEndPoint, "name")).iterator().next());
+    Assert.assertEquals(1, incomingSummary.get(new EndPointField(iEndPoint, "address")).size());
+    Assert.assertEquals(expected, incomingSummary.get(new EndPointField(iEndPoint, "address")).iterator().next());
+
+    // name and address from secure endpoint also depends on the body field of pEndPoint
+    Assert.assertEquals(1, incomingSummary.get(new EndPointField(sEndPoint, "name")).size());
+    Assert.assertEquals(expected, incomingSummary.get(new EndPointField(sEndPoint, "name")).iterator().next());
+    Assert.assertEquals(1, incomingSummary.get(new EndPointField(sEndPoint, "address")).size());
+    Assert.assertEquals(expected, incomingSummary.get(new EndPointField(sEndPoint, "address")).iterator().next());
+
+    // id of secure endpoint depends on both body field of pEndPoint and id field of cEndPoint
+    Set<EndPointField> expectedSet = new HashSet<>();
+    expectedSet.add(new EndPointField(pEndPoint, "body"));
+    expectedSet.add(new EndPointField(cEndPoint, "id"));
+    Assert.assertEquals(expectedSet, incomingSummary.get(new EndPointField(sEndPoint, "id")));
+
+    Map<EndPointField, Set<EndPointField>> outgoingSummary = fllInfo.getOutgoingSummary();
+    // outgoing summary will not contain offset but only body from pEndPoint and id from cEndPoint
+    Assert.assertEquals(2, outgoingSummary.size());
+
+    expectedSet = new HashSet<>();
+    expectedSet.add(new EndPointField(iEndPoint, "id"));
+    expectedSet.add(new EndPointField(iEndPoint, "name"));
+    expectedSet.add(new EndPointField(iEndPoint, "address"));
+    expectedSet.add(new EndPointField(sEndPoint, "id"));
+    expectedSet.add(new EndPointField(sEndPoint, "name"));
+    expectedSet.add(new EndPointField(sEndPoint, "address"));
+    // body affects all fields from both secure and insecure endpoints
+    Assert.assertEquals(expectedSet, outgoingSummary.get(new EndPointField(pEndPoint, "body")));
+
+    expectedSet.clear();
+    expectedSet.add(new EndPointField(sEndPoint, "id"));
+    // id field of cEndPoint only affects id field of secure endpoint
+    Assert.assertEquals(expectedSet, outgoingSummary.get(new EndPointField(cEndPoint, "id")));
+  }
+
+  @Test
   public void testMultiPathFieldLineage() {
     // read1: file1 -> (offset, body)
     // read2: file2 -> (offset, body)

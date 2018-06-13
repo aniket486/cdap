@@ -21,12 +21,12 @@ import co.cask.cdap.api.lineage.field.Operation;
 import java.util.Objects;
 
 /**
- *
+ * Node in the {@link FieldLineageGraph} representing EndPoint.
  */
 public class OperationNode extends Node {
   private final Operation operation;
 
-  public OperationNode(Operation operation) {
+  OperationNode(Operation operation) {
     super(Type.OPERATION);
     this.operation = operation;
   }

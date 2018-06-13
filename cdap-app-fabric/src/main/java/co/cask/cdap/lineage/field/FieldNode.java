@@ -19,13 +19,13 @@ package co.cask.cdap.lineage.field;
 import java.util.Objects;
 
 /**
- *
+ * Node in the {@link FieldLineageGraph} representing field.
  */
 public class FieldNode extends Node {
   private final String origin;
   private final String name;
 
-  public FieldNode(String origin, String name) {
+  FieldNode(String origin, String name) {
     super(Type.FIELD);
     this.origin = origin;
     this.name = name;

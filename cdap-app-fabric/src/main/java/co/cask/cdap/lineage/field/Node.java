@@ -19,14 +19,14 @@ package co.cask.cdap.lineage.field;
 import java.util.Objects;
 
 /**
- *
+ * Abstract class for Node in the {@link FieldLineageGraph}.
  */
 public abstract class Node {
 
   private final Type type;
 
   /**
-   *
+   * Types of nodes in the {@link FieldLineageGraph}
    */
   public enum Type {
     ENDPOINT,
