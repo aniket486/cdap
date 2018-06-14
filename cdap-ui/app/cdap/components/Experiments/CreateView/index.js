@@ -207,6 +207,7 @@ export default class ExperimentCreateView extends Component {
         targetDimension={{ width: "auto" }}
         placement="bottom"
         className="create_new_experiment_popover"
+        showPopover={!experimentId ? true : false}
       >
         <ExperimentPopovers />
       </Popover>
