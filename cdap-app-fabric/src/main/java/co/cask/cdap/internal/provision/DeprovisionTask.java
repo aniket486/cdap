@@ -36,7 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
 /**
  * Performs steps to deprovision a cluster for a program run. Before any operation is performed, state is persisted
@@ -54,7 +53,7 @@ import java.util.function.Consumer;
  * PollingDelete -- (state == CREATING) --> Orphaned
  *
  */
-public class DeprovisionTask implements Runnable {
+public class DeprovisionTask {
   private static final Logger LOG = LoggerFactory.getLogger(DeprovisionTask.class);
   private final ProgramRunId programRunId;
   private final ProvisioningTaskInfo initialProvisioningTaskInfo;
@@ -65,14 +64,12 @@ public class DeprovisionTask implements Runnable {
   private final Transactional transactional;
   private final DatasetFramework datasetFramework;
   private final int retryTimeLimitSecs;
-  private final Consumer<ProgramRunId> cleanup;
   private RetryStrategy retryStrategy;
 
   public DeprovisionTask(ProvisioningTaskInfo initialProvisioningTaskInfo, Provisioner provisioner,
                          ProvisionerContext provisionerContext, ProvisionerNotifier provisionerNotifier,
                          LocationFactory locationFactory, Transactional transactional,
-                         DatasetFramework datasetFramework, int retryTimeLimitSecs,
-                         Consumer<ProgramRunId> cleanup) {
+                         DatasetFramework datasetFramework, int retryTimeLimitSecs) {
     this.programRunId = initialProvisioningTaskInfo.getProgramRunId();
     this.initialProvisioningTaskInfo = initialProvisioningTaskInfo;
     this.provisioner = provisioner;
@@ -82,23 +79,14 @@ public class DeprovisionTask implements Runnable {
     this.transactional = transactional;
     this.datasetFramework = datasetFramework;
     this.retryTimeLimitSecs = retryTimeLimitSecs;
-    this.cleanup = cleanup;
   }
 
-  @Override
-  public void run() {
+  public void run() throws InterruptedException {
+    LOG.debug("Running deprovision task for program {}", programRunId);
     this.retryStrategy =
       RetryStrategies.statefulTimeLimit(retryTimeLimitSecs, TimeUnit.SECONDS, System.currentTimeMillis(),
                                         RetryStrategies.exponentialDelay(1, 20, TimeUnit.SECONDS));
-    try {
-      execute(initialProvisioningTaskInfo);
-      cleanup.accept(programRunId);
-    } catch (InterruptedException e) {
-      // We can get interrupted if the task is cancelled or CDAP is stopped. In either case, just return.
-      // If it was cancelled, state cleanup is left to the caller. If it was CDAP master stopping, the task
-      // will be resumed on master startup
-      LOG.debug("Deprovision task for program run {} interrupted.", programRunId);
-    }
+    execute(initialProvisioningTaskInfo);
   }
 
   private void execute(ProvisioningTaskInfo taskInfo) throws InterruptedException {
@@ -192,7 +180,7 @@ public class DeprovisionTask implements Runnable {
     }
   }
 
-  private void handleFailure(ProvisioningTaskInfo taskInfo, Throwable t) throws InterruptedException {
+  private void handleFailure(ProvisioningTaskInfo taskInfo, Throwable t) {
     LOG.warn("Error deprovisioning cluster for program run {} during {} step. Cluster will be moved to orphaned state.",
              programRunId, taskInfo.getClusterOp().getStatus(), t);
     provisionerNotifier.orphaned(programRunId);
@@ -203,7 +191,7 @@ public class DeprovisionTask implements Runnable {
   }
 
   // write the state of the task to the ProvisionerDataset, retrying if any exception is caught
-  private void persistClusterInfo(ProvisioningTaskInfo taskInfo) throws InterruptedException {
+  private void persistClusterInfo(ProvisioningTaskInfo taskInfo) {
     try {
       // retry on every exception, up to the retry limit
       Retries.callWithRetries(() -> {

@@ -353,8 +353,23 @@ public class ProvisioningService extends AbstractIdleService {
     Map<String, String> properties = taskInfo.getProvisionerProperties();
     ProvisionerContext context = new DefaultProvisionerContext(taskInfo.getProgramRunId(), properties,
                                                                sparkCompat, createSSHContext(taskInfo.getSshKeyInfo()));
-    return new DeprovisionTask(taskInfo, provisioner, context, provisionerNotifier,
-                               locationFactory, transactional, datasetFramework, 300, taskCleanup);
+    DeprovisionTask task = new DeprovisionTask(taskInfo, provisioner, context, provisionerNotifier,
+                                               locationFactory, transactional, datasetFramework, 300);
+    return () -> {
+      try {
+        task.run();
+        taskCleanup.accept(taskInfo.getProgramRunId());
+      } catch (InterruptedException e) {
+        // We can get interrupted if the task is cancelled or CDAP is stopped. In either case, just return.
+        // If it was cancelled, state cleanup is left to the caller. If it was CDAP master stopping, the task
+        // will be resumed on master startup
+        LOG.debug("Deprovision task for program run {} interrupted.", taskInfo.getProgramRunId());
+      } catch (Throwable t) {
+        // Otherwise, if there was an error deprovisioning, run the cleanup
+        LOG.debug("Deprovision task for program run {} failed.", taskInfo.getProgramRunId(), t);
+        taskCleanup.accept(taskInfo.getProgramRunId());
+      }
+    };
   }
 
   private List<ProvisioningTaskInfo> getInProgressTasks() {
@@ -365,7 +380,15 @@ public class ProvisioningService extends AbstractIdleService {
       }),
       co.cask.cdap.common.service.RetryStrategies.exponentialDelay(10, 120, TimeUnit.SECONDS),
       t -> {
-        // Always retry, but log unexpected types of failures
+        // don't retry if we were interrupted, or if the service is not running
+        State serviceState = state();
+        if (serviceState != State.STARTING && serviceState != State.RUNNING) {
+          return false;
+        }
+        if (t instanceof InterruptedException) {
+          return false;
+        }
+        // Otherwise always retry, but log unexpected types of failures
         // We expect things like SocketTimeoutException or ConnectException
         // when talking to Dataset Service during startup
         Throwable rootCause = Throwables.getRootCause(t);

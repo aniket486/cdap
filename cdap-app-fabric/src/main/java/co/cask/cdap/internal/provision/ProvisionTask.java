@@ -99,6 +99,7 @@ public class ProvisionTask implements Runnable {
 
   @Override
   public void run() {
+    LOG.debug("Running provision task for program {}", programRunId);
     this.taskStartTime = System.currentTimeMillis();
     this.retryStrategy =
       RetryStrategies.statefulTimeLimit(retryTimeLimitSecs, TimeUnit.SECONDS, taskStartTime,
@@ -339,7 +340,7 @@ public class ProvisionTask implements Runnable {
   }
 
   // write the state of the task to the ProvisionerDataset, retrying if any exception is caught
-  private void persistClusterInfo(ProvisioningTaskInfo taskInfo) throws InterruptedException {
+  private void persistClusterInfo(ProvisioningTaskInfo taskInfo) {
     try {
       // retry on every exception, up to the retry limit
       Retries.callWithRetries(() -> {

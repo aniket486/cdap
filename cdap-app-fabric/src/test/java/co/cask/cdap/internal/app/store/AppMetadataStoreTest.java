@@ -288,6 +288,7 @@ public class AppMetadataStoreTest {
     // STARTING status will be ignored if there's any existing record
     txnl.execute(() -> {
       recordProvisionAndStart(programRunId6, metadataStoreDataset);
+      // CDAP-13551 - seems like the program should not be allowed to suspend when in starting state
       metadataStoreDataset.recordProgramSuspend(programRunId6,
                                                 AppFabricTestHelper.createSourceId(sourceId.incrementAndGet()),
                                                 currentTime);
