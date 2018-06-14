@@ -53,6 +53,7 @@ case class RecordBuilder(namespace: String, applicationName: String, application
     val statusTimes = this.statusTimes ++ other.statusTimes
     val startInfo = if (this.startInfo.isEmpty) other.startInfo else this.startInfo
     val r = RecordBuilder(namespace, applicationName, applicationVersion, programType, program, run,
+      // TODO: [CDAP-13397] Use real data for number of records out, number of errors, number of warnings metrics
       statusTimes, startInfo, 0, 0, 0)
     LOG.trace("Merged this {} with other {} to get a new {}", this, other, r)
     r

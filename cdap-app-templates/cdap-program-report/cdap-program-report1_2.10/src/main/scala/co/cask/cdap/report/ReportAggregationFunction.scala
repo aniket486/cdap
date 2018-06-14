@@ -220,27 +220,26 @@ class ReportAggregationFunction extends UserDefinedAggregateFunction {
       bufferRow.getAs[String](Constants.PROGRAM_TYPE), bufferRow.getAs[String](Constants.PROGRAM),
       bufferRow.getAs[String](Constants.RUN), status,
       start, running, end, duration, startInfo.map(_.getAs[String](Constants.USER)).orNull,
+      // TODO: [CDAP-13397] Use real data for number of records out, number of errors, number of warnings metrics
       startMethod, runtimeArgs.orNull, 0, 0, 0)
   }
 }
 
 object ReportAggregationFunction {
-  val LOG = LoggerFactory.getLogger(ReportAggregationFunction.getClass)
   val STATUSES = "statuses"
   val END_STATUSES = Set("COMPLETED", "KILLED", "FAILED")
-  val SCHEDULE_INFO_KEY = "triggeringScheduleInfo"
   val STRING_TYPE_FIELDS = Seq(Constants.NAMESPACE, Constants.APPLICATION_NAME,
     Constants.APPLICATION_VERSION, Constants.PROGRAM_TYPE, Constants.PROGRAM, Constants.RUN)
-  val ARTIFACT_SCHEMA = new StructType()
+  val ARTIFACT_SCHEMA: StructType = new StructType()
     .add(Constants.ARTIFACT_NAME, StringType, false)
     .add(Constants.ARTIFACT_SCOPE, StringType, false)
     .add(Constants.ARTIFACT_VERSION, StringType, false)
-  val INPUT_START_INFO_SCHEMA = new StructType()
+  val INPUT_START_INFO_SCHEMA: StructType = new StructType()
     // TODO: [CDAP-13541] USER filed is null if authentication is disabled
     .add(Constants.USER, StringType, true)
     .add(Constants.RUNTIME_ARGUMENTS, MapType(StringType, StringType), false)
     .add(Constants.ARTIFACT_ID, ARTIFACT_SCHEMA, false)
-  val STATUS_TIME_SCHEMA = new StructType()
+  val STATUS_TIME_SCHEMA: StructType = new StructType()
     .add(Constants.STATUS, StringType, false)
     .add(Constants.TIME, LongType)
 }
