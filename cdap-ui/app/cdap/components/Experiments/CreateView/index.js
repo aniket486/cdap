@@ -170,7 +170,7 @@ export default class ExperimentCreateView extends Component {
       <span>
         {this.renderTopPanel(this.title)}
         <DataPrepConnections
-          sidePanelExpanded={true}
+          sidePanelExpanded={false}
           enableRouting={false}
           singleWorkspaceMode={true}
           onWorkspaceCreate={(workspaceId) => {
@@ -178,6 +178,7 @@ export default class ExperimentCreateView extends Component {
             this.setState({workspaceId});
           }}
           scope={true}
+          browserTitle="Select a file to use in your experiment"
         />
       </span>
     );
