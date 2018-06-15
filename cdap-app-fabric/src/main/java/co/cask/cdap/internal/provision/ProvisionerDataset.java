@@ -82,13 +82,14 @@ public class ProvisionerDataset {
   }
 
   public void putTaskInfo(ProvisioningTaskInfo taskInfo) {
-    ProvisioningTaskKey key = new ProvisioningTaskKey(taskInfo.getProgramRunId(), taskInfo.getClusterOp().getType());
+    ProvisioningTaskKey key = new ProvisioningTaskKey(taskInfo.getProgramRunId(),
+                                                      taskInfo.getProvisioningOp().getType());
     table.write(getRowKey(key), taskInfo);
   }
 
   public void deleteTaskInfo(ProgramRunId programRunId) {
-    table.delete(getRowKey(new ProvisioningTaskKey(programRunId, ClusterOp.Type.PROVISION)));
-    table.delete(getRowKey(new ProvisioningTaskKey(programRunId, ClusterOp.Type.DEPROVISION)));
+    table.delete(getRowKey(new ProvisioningTaskKey(programRunId, ProvisioningOp.Type.PROVISION)));
+    table.delete(getRowKey(new ProvisioningTaskKey(programRunId, ProvisioningOp.Type.DEPROVISION)));
   }
 
   private MDSKey getRowKey(ProvisioningTaskKey key) {

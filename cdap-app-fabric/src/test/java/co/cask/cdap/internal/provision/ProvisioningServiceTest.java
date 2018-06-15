@@ -125,50 +125,50 @@ public class ProvisioningServiceTest {
   }
 
   @Test
-  public void testNoErrors() throws Exception {
+  public void testNoErrors() {
     ProvisionerInfo provisionerInfo = new MockProvisioner.PropertyBuilder().build();
-    ProgramRunId runId = testProvision(ClusterOp.Status.CREATED, provisionerInfo);
-    testDeprovision(runId, ClusterOp.Status.DELETED);
+    ProgramRunId runId = testProvision(ProvisioningOp.Status.CREATED, provisionerInfo);
+    testDeprovision(runId, ProvisioningOp.Status.DELETED);
   }
 
   @Test
-  public void testRetryableFailures() throws Exception {
+  public void testRetryableFailures() {
     // will throw a retryable exception every other method call
     ProvisionerInfo provisionerInfo = new MockProvisioner.PropertyBuilder().failRetryablyEveryN(2).build();
-    ProgramRunId runId = testProvision(ClusterOp.Status.CREATED, provisionerInfo);
-    testDeprovision(runId, ClusterOp.Status.DELETED);
+    ProgramRunId runId = testProvision(ProvisioningOp.Status.CREATED, provisionerInfo);
+    testDeprovision(runId, ProvisioningOp.Status.DELETED);
   }
 
   @Test
-  public void testProvisionCreateFailure() throws Exception {
-    testProvision(ClusterOp.Status.FAILED, new MockProvisioner.PropertyBuilder().failCreate().build());
+  public void testProvisionCreateFailure() {
+    testProvision(ProvisioningOp.Status.FAILED, new MockProvisioner.PropertyBuilder().failCreate().build());
   }
 
   @Test
-  public void testProvisionPollFailure() throws Exception {
-    testProvision(ClusterOp.Status.FAILED, new MockProvisioner.PropertyBuilder().failGet().build());
+  public void testProvisionPollFailure() {
+    testProvision(ProvisioningOp.Status.FAILED, new MockProvisioner.PropertyBuilder().failGet().build());
   }
 
   @Test
-  public void testProvisionInitFailure() throws Exception {
-    testProvision(ClusterOp.Status.FAILED, new MockProvisioner.PropertyBuilder().failInit().build());
+  public void testProvisionInitFailure() {
+    testProvision(ProvisioningOp.Status.FAILED, new MockProvisioner.PropertyBuilder().failInit().build());
   }
 
   @Test
-  public void testProvisionCreateRetry() throws Exception {
+  public void testProvisionCreateRetry() {
     // simulates cluster create, then when polling, cluster status goes to a state that requires
     // that the cluster be deleted, and create retried
-    testProvision(ClusterOp.Status.CREATED,
+    testProvision(ProvisioningOp.Status.CREATED,
                   new MockProvisioner.PropertyBuilder()
                              .setFirstClusterStatus(ClusterStatus.FAILED)
                              .failRetryablyEveryN(2)
                              .build());
-    testProvision(ClusterOp.Status.CREATED,
+    testProvision(ProvisioningOp.Status.CREATED,
                   new MockProvisioner.PropertyBuilder()
                              .setFirstClusterStatus(ClusterStatus.DELETING)
                              .failRetryablyEveryN(2)
                              .build());
-    testProvision(ClusterOp.Status.CREATED,
+    testProvision(ProvisioningOp.Status.CREATED,
                   new MockProvisioner.PropertyBuilder()
                              .setFirstClusterStatus(ClusterStatus.NOT_EXISTS)
                              .failRetryablyEveryN(2)
@@ -176,10 +176,10 @@ public class ProvisioningServiceTest {
   }
 
   @Test
-  public void testDeprovisionFailure() throws Exception {
-    ProgramRunId runId = testProvision(ClusterOp.Status.CREATED,
+  public void testDeprovisionFailure() {
+    ProgramRunId runId = testProvision(ProvisioningOp.Status.CREATED,
                                        new MockProvisioner.PropertyBuilder().failDelete().build());
-    testDeprovision(runId, ClusterOp.Status.FAILED);
+    testDeprovision(runId, ProvisioningOp.Status.FAILED);
   }
 
   @Test
@@ -187,7 +187,7 @@ public class ProvisioningServiceTest {
     // write state for a provision operation that is polling for the cluster to be created
     TaskFields taskFields = createTaskInfo(new MockProvisioner.PropertyBuilder().build());
 
-    ClusterOp op = new ClusterOp(ClusterOp.Type.PROVISION, ClusterOp.Status.POLLING_CREATE);
+    ProvisioningOp op = new ProvisioningOp(ProvisioningOp.Type.PROVISION, ProvisioningOp.Status.POLLING_CREATE);
     Cluster cluster = new Cluster("name", ClusterStatus.CREATING, Collections.emptyList(), Collections.emptyMap());
     ProvisioningTaskInfo taskInfo = new ProvisioningTaskInfo(taskFields.programRunId, taskFields.programDescriptor,
                                                              taskFields.programOptions, Collections.emptyMap(),
@@ -201,15 +201,15 @@ public class ProvisioningServiceTest {
 
     provisioningService.resumeTasks(t -> { });
 
-    ProvisioningTaskKey taskKey = new ProvisioningTaskKey(taskFields.programRunId, ClusterOp.Type.PROVISION);
-    Tasks.waitFor(ClusterOp.Status.CREATED, () -> Transactionals.execute(transactional, dsContext -> {
+    ProvisioningTaskKey taskKey = new ProvisioningTaskKey(taskFields.programRunId, ProvisioningOp.Type.PROVISION);
+    Tasks.waitFor(ProvisioningOp.Status.CREATED, () -> Transactionals.execute(transactional, dsContext -> {
       ProvisionerDataset provisionerDataset = ProvisionerDataset.get(dsContext, datasetFramework);
       ProvisioningTaskInfo tinfo = provisionerDataset.getTaskInfo(taskKey);
-      return tinfo == null ? null : tinfo.getClusterOp().getStatus();
+      return tinfo == null ? null : tinfo.getProvisioningOp().getStatus();
     }), 20, TimeUnit.SECONDS);
   }
 
-  private ProgramRunId testProvision(ClusterOp.Status expectedState, ProvisionerInfo provisionerInfo) throws Exception {
+  private ProgramRunId testProvision(ProvisioningOp.Status expectedState, ProvisionerInfo provisionerInfo) {
     TaskFields taskFields = createTaskInfo(provisionerInfo);
 
     Runnable task = Transactionals.execute(transactional, dsContext -> {
@@ -219,27 +219,27 @@ public class ProvisioningServiceTest {
     });
     task.run();
 
-    ProvisioningTaskKey taskKey = new ProvisioningTaskKey(taskFields.programRunId, ClusterOp.Type.PROVISION);
-    ClusterOp.Status actualState = Transactionals.execute(transactional, dsContext -> {
+    ProvisioningTaskKey taskKey = new ProvisioningTaskKey(taskFields.programRunId, ProvisioningOp.Type.PROVISION);
+    ProvisioningOp.Status actualState = Transactionals.execute(transactional, dsContext -> {
       ProvisionerDataset provisionerDataset = ProvisionerDataset.get(dsContext, datasetFramework);
       ProvisioningTaskInfo provisioningTaskInfo = provisionerDataset.getTaskInfo(taskKey);
-      return provisioningTaskInfo == null ? null : provisioningTaskInfo.getClusterOp().getStatus();
+      return provisioningTaskInfo == null ? null : provisioningTaskInfo.getProvisioningOp().getStatus();
     });
     Assert.assertEquals(expectedState, actualState);
     return taskFields.programRunId;
   }
 
-  private void testDeprovision(ProgramRunId programRunId, ClusterOp.Status expectedState) throws Exception {
+  private void testDeprovision(ProgramRunId programRunId, ProvisioningOp.Status expectedState) {
     Runnable task = Transactionals.execute(transactional, dsContext -> {
       return provisioningService.deprovision(programRunId, dsContext, t -> { });
     });
     task.run();
 
-    ProvisioningTaskKey taskKey = new ProvisioningTaskKey(programRunId, ClusterOp.Type.DEPROVISION);
-    ClusterOp.Status actualState = Transactionals.execute(transactional, dsContext -> {
+    ProvisioningTaskKey taskKey = new ProvisioningTaskKey(programRunId, ProvisioningOp.Type.DEPROVISION);
+    ProvisioningOp.Status actualState = Transactionals.execute(transactional, dsContext -> {
       ProvisionerDataset provisionerDataset = ProvisionerDataset.get(dsContext, datasetFramework);
       ProvisioningTaskInfo provisioningTaskInfo = provisionerDataset.getTaskInfo(taskKey);
-      return provisioningTaskInfo == null ? null : provisioningTaskInfo.getClusterOp().getStatus();
+      return provisioningTaskInfo == null ? null : provisioningTaskInfo.getProvisioningOp().getStatus();
     });
     Assert.assertEquals(expectedState, actualState);
   }

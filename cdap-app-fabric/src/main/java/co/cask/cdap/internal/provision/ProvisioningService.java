@@ -31,6 +31,9 @@ import co.cask.cdap.data2.transaction.TransactionSystemClientAdapter;
 import co.cask.cdap.data2.transaction.Transactions;
 import co.cask.cdap.internal.app.runtime.SystemArguments;
 import co.cask.cdap.internal.app.spark.SparkCompatReader;
+import co.cask.cdap.internal.provision.task.DeprovisionTask;
+import co.cask.cdap.internal.provision.task.ProvisionTask;
+import co.cask.cdap.internal.provision.task.ProvisioningTask;
 import co.cask.cdap.proto.id.NamespaceId;
 import co.cask.cdap.proto.id.ProgramRunId;
 import co.cask.cdap.proto.provisioner.ProvisionerDetail;
@@ -154,7 +157,7 @@ public class ProvisioningService extends AbstractIdleService {
       }
       ProgramRunId programRunId = provisioningTaskInfo.getProgramRunId();
 
-      ClusterOp clusterOp = provisioningTaskInfo.getClusterOp();
+      ProvisioningOp provisioningOp = provisioningTaskInfo.getProvisioningOp();
       String provisionerName = provisioningTaskInfo.getProvisionerName();
       Provisioner provisioner = provisionerInfo.get().provisioners.get(provisionerName);
 
@@ -171,7 +174,7 @@ public class ProvisioningService extends AbstractIdleService {
       }
 
       Runnable task = null;
-      switch (clusterOp.getType()) {
+      switch (provisioningOp.getType()) {
         case PROVISION:
           task = createProvisionTask(provisioningTaskInfo, provisioner);
           break;
@@ -181,7 +184,8 @@ public class ProvisioningService extends AbstractIdleService {
       }
 
       LOG.debug("Resuming provisioning task for run {} of type {} in state {}.", provisioningTaskInfo.getProgramRunId(),
-                provisioningTaskInfo.getClusterOp().getType(), provisioningTaskInfo.getClusterOp().getStatus());
+                provisioningTaskInfo.getProvisioningOp().getType(),
+                provisioningTaskInfo.getProvisioningOp().getStatus());
       executorService.execute(task);
     }
   }
@@ -230,10 +234,11 @@ public class ProvisioningService extends AbstractIdleService {
     }
 
     Map<String, String> properties = SystemArguments.getProfileProperties(args);
-    ClusterOp clusterOp = new ClusterOp(ClusterOp.Type.PROVISION, ClusterOp.Status.REQUESTING_CREATE);
+    ProvisioningOp provisioningOp = new ProvisioningOp(ProvisioningOp.Type.PROVISION,
+                                                       ProvisioningOp.Status.REQUESTING_CREATE);
     ProvisioningTaskInfo provisioningTaskInfo =
       new ProvisioningTaskInfo(programRunId, provisionRequest.getProgramDescriptor(), programOptions,
-                               properties, name, provisionRequest.getUser(), clusterOp, sshKeyInfo, null);
+                               properties, name, provisionRequest.getUser(), provisioningOp, sshKeyInfo, null);
     ProvisionerDataset provisionerDataset = ProvisionerDataset.get(datasetContext, datasetFramework);
     provisionerDataset.putTaskInfo(provisioningTaskInfo);
 
@@ -261,7 +266,7 @@ public class ProvisioningService extends AbstractIdleService {
 
     // look up information for the corresponding provision operation
     ProvisioningTaskInfo existing =
-      provisionerDataset.getTaskInfo(new ProvisioningTaskKey(programRunId, ClusterOp.Type.PROVISION));
+      provisionerDataset.getTaskInfo(new ProvisioningTaskKey(programRunId, ProvisioningOp.Type.PROVISION));
     if (existing == null) {
       LOG.error("Received request to de-provision a cluster for program run {}, but could not find information " +
                   "about the cluster.", programRunId);
@@ -277,8 +282,10 @@ public class ProvisioningService extends AbstractIdleService {
       return () -> { };
     }
 
-    ClusterOp clusterOp = new ClusterOp(ClusterOp.Type.DEPROVISION, ClusterOp.Status.REQUESTING_DELETE);
-    ProvisioningTaskInfo provisioningTaskInfo = new ProvisioningTaskInfo(existing, clusterOp, existing.getCluster());
+    ProvisioningOp provisioningOp = new ProvisioningOp(ProvisioningOp.Type.DEPROVISION,
+                                                       ProvisioningOp.Status.REQUESTING_DELETE);
+    ProvisioningTaskInfo provisioningTaskInfo = new ProvisioningTaskInfo(existing, provisioningOp,
+                                                                         existing.getCluster());
     provisionerDataset.putTaskInfo(provisioningTaskInfo);
 
     return createDeprovisionTask(provisioningTaskInfo, provisioner, taskCleanup);
@@ -345,7 +352,17 @@ public class ProvisioningService extends AbstractIdleService {
                                                                sparkCompat, createSSHContext(taskInfo.getSshKeyInfo()));
 
     // TODO: (CDAP-13246) pick up timeout from profile instead of hardcoding
-    return new ProvisionTask(taskInfo, provisioner, context, provisionerNotifier, transactional, datasetFramework, 300);
+    ProvisioningTask task = new ProvisionTask(taskInfo, transactional, datasetFramework, provisioner, context,
+                                              provisionerNotifier, 300);
+    return () -> {
+      try {
+        task.execute();
+      } catch (InterruptedException e) {
+        LOG.debug("Provision task for program run {} interrupted.", taskInfo.getProgramRunId());
+      } catch (Exception e) {
+        LOG.info("Provision task for program run {} failed.", taskInfo.getProgramRunId(), e);
+      }
+    };
   }
 
   private Runnable createDeprovisionTask(ProvisioningTaskInfo taskInfo, Provisioner provisioner,
@@ -353,20 +370,20 @@ public class ProvisioningService extends AbstractIdleService {
     Map<String, String> properties = taskInfo.getProvisionerProperties();
     ProvisionerContext context = new DefaultProvisionerContext(taskInfo.getProgramRunId(), properties,
                                                                sparkCompat, createSSHContext(taskInfo.getSshKeyInfo()));
-    DeprovisionTask task = new DeprovisionTask(taskInfo, provisioner, context, provisionerNotifier,
-                                               locationFactory, transactional, datasetFramework, 300);
+    DeprovisionTask task = new DeprovisionTask(taskInfo, transactional, datasetFramework, 300,
+                                               provisioner, context, provisionerNotifier, locationFactory);
     return () -> {
       try {
-        task.run();
+        task.execute();
         taskCleanup.accept(taskInfo.getProgramRunId());
       } catch (InterruptedException e) {
         // We can get interrupted if the task is cancelled or CDAP is stopped. In either case, just return.
         // If it was cancelled, state cleanup is left to the caller. If it was CDAP master stopping, the task
         // will be resumed on master startup
         LOG.debug("Deprovision task for program run {} interrupted.", taskInfo.getProgramRunId());
-      } catch (Throwable t) {
+      } catch (Exception e) {
         // Otherwise, if there was an error deprovisioning, run the cleanup
-        LOG.debug("Deprovision task for program run {} failed.", taskInfo.getProgramRunId(), t);
+        LOG.info("Deprovision task for program run {} failed.", taskInfo.getProgramRunId(), e);
         taskCleanup.accept(taskInfo.getProgramRunId());
       }
     };

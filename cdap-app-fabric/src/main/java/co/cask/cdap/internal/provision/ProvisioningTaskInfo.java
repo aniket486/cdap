@@ -28,7 +28,7 @@ import javax.annotation.Nullable;
  * Information about a provisioning task for a program run.
  */
 public class ProvisioningTaskInfo {
-  private final ClusterOp op;
+  private final ProvisioningOp op;
   private final ProgramRunId programRunId;
   private final ProgramDescriptor programDescriptor;
   private final ProgramOptions programOptions;
@@ -40,7 +40,7 @@ public class ProvisioningTaskInfo {
 
   public ProvisioningTaskInfo(ProgramRunId programRunId, ProgramDescriptor programDescriptor,
                               ProgramOptions programOptions, Map<String, String> provisionerProperties,
-                              String provisionerName, String user, ClusterOp op,
+                              String provisionerName, String user, ProvisioningOp op,
                               @Nullable SSHKeyInfo sshKeyInfo, @Nullable Cluster cluster) {
     this.programRunId = programRunId;
     this.provisionerProperties = provisionerProperties;
@@ -53,7 +53,7 @@ public class ProvisioningTaskInfo {
     this.cluster = cluster;
   }
 
-  public ProvisioningTaskInfo(ProvisioningTaskInfo existing, ClusterOp op, @Nullable Cluster cluster) {
+  public ProvisioningTaskInfo(ProvisioningTaskInfo existing, ProvisioningOp op, @Nullable Cluster cluster) {
     this(existing.getProgramRunId(), existing.getProgramDescriptor(), existing.getProgramOptions(),
          existing.getProvisionerProperties(), existing.getProvisionerName(), existing.getUser(), op,
          existing.getSshKeyInfo(), cluster);
@@ -87,7 +87,7 @@ public class ProvisioningTaskInfo {
     return provisionerName;
   }
 
-  public ClusterOp getClusterOp() {
+  public ProvisioningOp getProvisioningOp() {
     return op;
   }
 

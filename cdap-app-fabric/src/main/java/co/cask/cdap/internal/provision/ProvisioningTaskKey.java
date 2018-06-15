@@ -25,9 +25,9 @@ import java.util.Objects;
  */
 public class ProvisioningTaskKey {
   private final ProgramRunId programRunId;
-  private final ClusterOp.Type type;
+  private final ProvisioningOp.Type type;
 
-  public ProvisioningTaskKey(ProgramRunId programRunId, ClusterOp.Type type) {
+  public ProvisioningTaskKey(ProgramRunId programRunId, ProvisioningOp.Type type) {
     this.programRunId = programRunId;
     this.type = type;
   }
@@ -36,7 +36,7 @@ public class ProvisioningTaskKey {
     return programRunId;
   }
 
-  public ClusterOp.Type getType() {
+  public ProvisioningOp.Type getType() {
     return type;
   }
 
