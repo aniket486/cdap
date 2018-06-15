@@ -31,7 +31,6 @@ import com.google.gson.GsonBuilder;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -39,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import javax.annotation.Nullable;
 
 /**
  * Class representing the information about field lineage for a single program run.
@@ -56,6 +54,9 @@ public class FieldLineageInfo {
     .create();
 
   private final Set<Operation> operations;
+  private final Set<WriteOperation> writeOperations;
+  // Map of operation name to the operation
+  private final Map<String, Operation> operationsMap;
 
   // Map of EndPoint representing destination to the set of fields belonging to it.
   private transient Map<EndPoint, Set<String>> destinationFields;
@@ -83,16 +84,21 @@ public class FieldLineageInfo {
    * @throws IllegalArgumentException if validation fails
    */
   public FieldLineageInfo(Collection<? extends Operation> operations) {
-    Set<String> operationNames = new HashSet<>();
     Set<String> allOrigins = new HashSet<>();
+    this.operationsMap = new HashMap<>();
+    this.writeOperations = new HashSet<>();
     boolean readExists = false;
     boolean writeExists = false;
     for (Operation operation : operations) {
-      if (!operationNames.add(operation.getName())) {
+      if (operationsMap.containsKey(operation.getName())) {
         throw new IllegalArgumentException(String.format("All operations provided for creating field " +
-                                                           "level lineage info must have unique names. " +
-                                                           "Operation name '%s' is repeated.", operation.getName()));
+                "level lineage info must have unique names. " +
+                "Operation name '%s' is repeated.", operation.getName()));
+
       }
+
+      operationsMap.put(operation.getName(), operation);
+
       switch (operation.getType()) {
         case READ:
           ReadOperation read = (ReadOperation) operation;
@@ -116,6 +122,7 @@ public class FieldLineageInfo {
           }
           allOrigins.addAll(write.getInputs().stream().map(InputField::getOrigin).collect(Collectors.toList()));
           writeExists = true;
+          writeOperations.add(write);
           break;
         default:
           // no-op
@@ -130,7 +137,7 @@ public class FieldLineageInfo {
       throw new IllegalArgumentException("Field level lineage requires at least one operation of type 'WRITE'.");
     }
 
-    Sets.SetView<String> invalidOrigins = Sets.difference(allOrigins, operationNames);
+    Sets.SetView<String> invalidOrigins = Sets.difference(allOrigins, operationsMap.keySet());
     if (!invalidOrigins.isEmpty()) {
       throw new IllegalArgumentException(String.format("No operation is associated with the origins '%s'.",
                                                        invalidOrigins));
@@ -195,126 +202,77 @@ public class FieldLineageInfo {
     return destinationFields;
   }
 
+  private Map<EndPointField, Set<EndPointField>> computeIncomingSummary() {
+    Map<EndPointField, Set<EndPointField>> result = new HashMap<>();
+    for (WriteOperation write : writeOperations) {
+      List<InputField> inputs = write.getInputs();
+      for (InputField input : inputs) {
+        Set<String> visitedOperationNames = new HashSet<>();
+        computeIncomingSummaryHelper(new EndPointField(write.getDestination(), input.getName()),
+                                     operationsMap.get(input.getOrigin()), write, visitedOperationNames, result);
+      }
+    }
+    return result;
+  }
+
+  private void computeIncomingSummaryHelper(EndPointField destination, Operation currentOperation,
+                                            Operation previousOperation, Set<String> visitedOperationNames,
+                                            Map<EndPointField, Set<EndPointField>> result) {
+    if (!visitedOperationNames.add(currentOperation.getName())) {
+      // cycles detected
+      // TODO: CDAP-13548
+    }
+
+    if (currentOperation.getType() == OperationType.READ) {
+      // if current operation is of type READ, previous operation must be of type TRANSFORM or WRITE
+      // get only the input fields from the previous operations for which the origin is current READ operation
+      Set<InputField> inputFields = new HashSet<>();
+      if (OperationType.WRITE == previousOperation.getType()) {
+        WriteOperation previousWrite = (WriteOperation) previousOperation;
+        inputFields = new HashSet<>(previousWrite.getInputs());
+      } else if (OperationType.TRANSFORM == previousOperation.getType()) {
+        TransformOperation previousTransform = (TransformOperation) previousOperation;
+        inputFields = new HashSet<>(previousTransform.getInputs());
+      }
+
+      Set<EndPointField> sourceEndPointFields = result.computeIfAbsent(destination, k -> new HashSet<>());
+
+      ReadOperation read = (ReadOperation) currentOperation;
+      EndPoint source = read.getSource();
+      for (InputField inputField : inputFields) {
+        if (inputField.getOrigin().equals(currentOperation.getName())) {
+          sourceEndPointFields.add(new EndPointField(source, inputField.getName()));
+        }
+      }
+
+      return;
+    }
+
+    if (currentOperation.getType() != OperationType.TRANSFORM) {
+      return;
+    }
+
+    TransformOperation transform = (TransformOperation) currentOperation;
+    for (InputField field : transform.getInputs()) {
+      computeIncomingSummaryHelper(destination, operationsMap.get(field.getOrigin()), currentOperation,
+                                   visitedOperationNames, result);
+    }
+  }
+
   private Map<EndPointField, Set<EndPointField>> computeOutgoingSummary() {
     Map<EndPointField, Set<EndPointField>> outgoingSummary = new HashMap<>();
-    FieldLineageGraph graph = new FieldLineageGraph(this.operations);
-    List<List<Node>> allPaths = graph.getAllPaths();
-
-    for (List<Node> path : allPaths) {
-
-      EndPointField sourceEndPointField = getSourceEndPointFieldFromPath(path);
-      if (sourceEndPointField == null) {
-        continue;
-      }
-
-      EndPointField destinationEndPointField = getDestinationEndPointFieldFromPath(path);
-      if (destinationEndPointField == null) {
-        continue;
-      }
-
-      Set<EndPointField> outgoingEndPointFields = outgoingSummary.computeIfAbsent(sourceEndPointField,
-                                                                                  k -> new HashSet<>());
-      outgoingEndPointFields.add(destinationEndPointField);
-    }
-    return outgoingSummary;
-  }
-
-  /**
-   * Extract and return the source {@link EndPointField} from a given path.
-   * For any complete path, first three nodes are required to create the source EndPointField.
-   * First node represents the source EndPoint, second node represents the operation of type READ, and
-   * third node represent the field. If source EndPointField cannot be constructed from the path,
-   * possibly because the complete lineage information is not available, {@code null} is returned.
-   */
-  @Nullable
-  private EndPointField getSourceEndPointFieldFromPath(List<Node> path) {
-    if (path.size() < 3) {
-      return null;
+    if (incomingSummary == null) {
+      incomingSummary = computeIncomingSummary();
     }
 
-    Node node = path.get(0);
-    if (node.getType() != Node.Type.ENDPOINT) {
-      return null;
-    }
-
-    EndPointNode endPointNode = (EndPointNode) node;
-    EndPoint source = endPointNode.getEndPoint();
-
-    node = path.get(1);
-    if (node.getType() != Node.Type.OPERATION) {
-      return null;
-    }
-
-    OperationNode operationNode = (OperationNode) node;
-    if (operationNode.getOperation().getType() != OperationType.READ) {
-      return null;
-    }
-
-    node = path.get(2);
-    if (node.getType() != Node.Type.FIELD) {
-      return null;
-    }
-
-    FieldNode fieldNode = (FieldNode) node;
-    return new EndPointField(source, fieldNode.getName());
-  }
-
-  /**
-   * Extract and return the destination {@link EndPointField} from a given path.
-   * For any complete path, last three nodes are required to create the destination EndPointField.
-   * Second node from last represents the field being written, first node from the last
-   * represents the operation of type WRITE, and last node represents the destination EndPoint.
-   * If destination EndPointField cannot be constructed from the path, possibly because the complete
-   * lineage information is not available, {@code null} is returned.
-   */
-  @Nullable
-  private EndPointField getDestinationEndPointFieldFromPath(List<Node> path) {
-    if (path.size() < 3) {
-      return null;
-    }
-
-    int index = path.size() - 1;
-    Node node = path.get(index);
-    if (node.getType() != Node.Type.ENDPOINT) {
-      return null;
-    }
-
-    EndPointNode endPointNode = (EndPointNode) node;
-    EndPoint destination = endPointNode.getEndPoint();
-
-    node = path.get(index - 1);
-    if (node.getType() != Node.Type.OPERATION) {
-      return null;
-    }
-
-    OperationNode operationNode = (OperationNode) node;
-    if (operationNode.getOperation().getType() != OperationType.WRITE) {
-      return null;
-    }
-
-    node = path.get(index - 2);
-    if (node.getType() != Node.Type.FIELD) {
-      return null;
-    }
-
-    FieldNode fieldNode = (FieldNode) node;
-    return new EndPointField(destination, fieldNode.getName());
-  }
-
-  private Map<EndPointField, Set<EndPointField>> computeIncomingSummary() {
-    Map<EndPointField, Set<EndPointField>> incomingSummary = new HashMap<>();
-    if (outgoingSummary == null) {
-      outgoingSummary = computeOutgoingSummary();
-    }
-
-    for (Map.Entry<EndPointField, Set<EndPointField>> entry : outgoingSummary.entrySet()) {
+    for (Map.Entry<EndPointField, Set<EndPointField>> entry : incomingSummary.entrySet()) {
       Set<EndPointField> values = entry.getValue();
       for (EndPointField value : values) {
-        Set<EndPointField> incomingEndPointFields = incomingSummary.computeIfAbsent(value, k -> new HashSet<>());
-        incomingEndPointFields.add(entry.getKey());
+        Set<EndPointField> outgoingEndPointFields = outgoingSummary.computeIfAbsent(value, k -> new HashSet<>());
+        outgoingEndPointFields.add(entry.getKey());
       }
     }
-    return incomingSummary;
+    return outgoingSummary;
   }
 
   /**
@@ -326,12 +284,7 @@ public class FieldLineageInfo {
    */
   private String canonicalize() {
     List<Operation> ops = new ArrayList<>(operations);
-    Collections.sort(ops, new Comparator<Operation>() {
-      @Override
-      public int compare(Operation o1, Operation o2) {
-        return o1.getName().compareTo(o2.getName());
-      }
-    });
+    ops.sort(Comparator.comparing(Operation::getName));
     return GSON.toJson(ops);
   }
 
